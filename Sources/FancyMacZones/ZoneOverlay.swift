@@ -155,6 +155,9 @@ final class ZoneView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
         let style = ZoneStyle.current(for: effectiveAppearance)
+        #if DEBUG
+        defer { drawDevStamp(in: ctx) } // on top of zones and the maximize preview
+        #endif
         if let maximize {
             style.drawZone(maximize, active: true, in: ctx)
             style.drawPill(.maximize, in: style.pillRect(.maximize, in: maximize, active: true, centred: true, flipped: false))
@@ -171,6 +174,21 @@ final class ZoneView: NSView {
             style.drawPill(pill, in: style.pillRect(pill, in: zones[active], active: true, centred: false, flipped: false))
         }
     }
+
+    #if DEBUG
+    /// FancyMacZones Dev stamp at the top right, 48 pt down to clear the menu bar (notched displays included).
+    private static let devStamp = NSAttributedString(string: "DEV", attributes: [.font: NSFont.systemFont(ofSize: 13, weight: .semibold),
+                                                                                 .foregroundColor: NSColor.white])
+
+    private func drawDevStamp(in ctx: CGContext) {
+        let s = Self.devStamp.size()
+        let pill = CGRect(x: bounds.maxX - 12 - ceil(s.width) - 16, y: bounds.maxY - 48 - 20, width: ceil(s.width) + 16, height: 20)
+        ctx.addPath(CGPath(roundedRect: pill, cornerWidth: 4, cornerHeight: 4, transform: nil))
+        ctx.setFillColor(rgb(0xCA5010)) // WinBar Dev's stamp colour; white text stays ≥ 4.5:1
+        ctx.fillPath()
+        Self.devStamp.draw(at: NSPoint(x: pill.midX - s.width / 2, y: pill.midY - s.height / 2))
+    }
+    #endif
 }
 
 /// The single overlay panel (DD-9): borderless, non-activating, click-through, at the floating level and on every

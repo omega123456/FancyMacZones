@@ -4,7 +4,11 @@ import AppKit
 /// image changes only when trust changes. Plain NSMenu target/action: this app may activate.
 final class MenuBar: NSObject, NSMenuDelegate {
     private let store: LayoutStore
+    #if DEBUG
+    private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength) // room for "DEV"
+    #else
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+    #endif
     private let menu = NSMenu()
 
     var trusted = false { didSet { if trusted != oldValue { updateImage() } } }
@@ -15,6 +19,10 @@ final class MenuBar: NSObject, NSMenuDelegate {
         menu.delegate = self
         menu.autoenablesItems = false
         item.menu = menu
+        #if DEBUG
+        item.button?.title = "DEV"
+        item.button?.imagePosition = .imageLeading
+        #endif
         updateImage()
     }
 
@@ -28,6 +36,11 @@ final class MenuBar: NSObject, NSMenuDelegate {
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
+        #if DEBUG
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+        add("FancyMacZones Dev \(version) (debug)", to: menu).isEnabled = false
+        menu.addItem(.separator())
+        #endif
         if trusted { buildTrusted() } else { buildUntrusted() }
     }
 
