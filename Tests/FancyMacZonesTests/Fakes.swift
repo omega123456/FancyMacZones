@@ -38,10 +38,12 @@ final class FakeWorkspace: NSWorkspace {
     let center = NotificationCenter()
     var opened: [URL] = []
     var contrast = false, solid = false
+    var frontmost: NSRunningApplication?
 
     override var notificationCenter: NotificationCenter { center }
     override var accessibilityDisplayShouldIncreaseContrast: Bool { contrast }
     override var accessibilityDisplayShouldReduceTransparency: Bool { solid }
+    override var frontmostApplication: NSRunningApplication? { frontmost }
     override func open(_ url: URL) -> Bool { opened.append(url); return true }
 }
 

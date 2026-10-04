@@ -718,7 +718,9 @@ enum Layouts {
 
     /// Requirement 15: the zone a window (global Cocoa) is already in. Edge alignment first (left, right and top
     /// within 8 pt, bottom inside the zone down to 8 pt below it, so a window trimmed from below still counts),
-    /// best IoU among several; otherwise the best IoU if at least 0.6; otherwise nil (floating).
+    /// best IoU among several; then the top-left corner within 8 pt (a window whose minimum or fixed size refused
+    /// the zone's size still lands there), best IoU among several; otherwise the best IoU if at least 0.6;
+    /// otherwise nil (floating).
     static func currentZone(of window: CGRect, in zones: [CGRect]) -> Int? {
         let t = edgeTolerance
         let aligned = zones.indices.filter { i in
@@ -727,6 +729,8 @@ enum Layouts {
                 && window.minY >= z.minY - t && window.minY < z.maxY
         }
         if let best = bestIoU(window, aligned, zones) { return best.index }
+        let cornered = zones.indices.filter { abs(window.minX - zones[$0].minX) <= t && abs(window.maxY - zones[$0].maxY) <= t }
+        if let best = bestIoU(window, cornered, zones) { return best.index }
         if let best = bestIoU(window, Array(zones.indices), zones), best.iou >= minIoU { return best.index }
         return nil
     }

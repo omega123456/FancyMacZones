@@ -129,10 +129,13 @@ enum AX {
         return try check(err) ? el : nil
     }
 
-    /// The focused window of the frontmost app: system-wide → focused application → focused window.
+    /// The focused window of the frontmost app: system-wide → focused application → focused window. Electron apps
+    /// can answer neither, so fall back to the frontmost app, then its main window, then its first window.
     static func focusedWindow() throws -> (app: AXUIElement, window: AXUIElement, pid: pid_t)? {
-        guard let app = try element(AXUIElementCreateSystemWide(), kAXFocusedApplicationAttribute),
-              let window = try element(app, kAXFocusedWindowAttribute),
+        let frontmost = Env.workspace.frontmostApplication.map { AXUIElementCreateApplication($0.processIdentifier) }
+        guard let app = try element(AXUIElementCreateSystemWide(), kAXFocusedApplicationAttribute) ?? frontmost,
+              let window = try element(app, kAXFocusedWindowAttribute) ?? element(app, kAXMainWindowAttribute)
+                ?? elements(app, kAXWindowsAttribute).first,
               let pid = backend.pid(app) else { return nil }
         return (app, window, pid)
     }

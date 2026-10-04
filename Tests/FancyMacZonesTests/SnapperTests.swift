@@ -340,6 +340,14 @@ extension Desktop {
             }
             snapper.move(.right)
             #expect(h.log.contains("hotkey right: no focused window"))
+            // No system-wide focused app: the frontmost one (here this process, whose windows are left alone).
+            let own = AXUIElementCreateApplication(getpid())
+            h.ax.pids[own] = getpid()
+            h.ax.attrs[own] = [kAXFocusedWindowAttribute: window]
+            h.ws.frontmost = .current
+            snapper.move(.right)
+            #expect(h.log.contains("window not eligible, left alone"))
+            h.ws.frontmost = nil
 
             h.focus(window, pid: Self.pid)
             place(zones[0])
@@ -350,6 +358,18 @@ extension Desktop {
             #expect(h.log.contains("zone 3 on Studio Display (Main) → zone 1"))
             snapper.move(.up) // the columns span the full height: nothing else in band
             #expect(h.log.contains("hotkey up: pid 91001 no zone in band"))
+            // Electron: no focused window, then no main window either.
+            let app = AXUIElementCreateApplication(Self.pid)
+            h.ax.attrs[app]![kAXFocusedWindowAttribute] = nil
+            h.ax.attrs[app]![kAXMainWindowAttribute] = window
+            place(zones[2])
+            snapper.move(.left)
+            #expect(h.log.contains("hotkey left: pid 91001 zone 3 on Studio Display (Main) → zone 2"))
+            h.ax.attrs[app]![kAXMainWindowAttribute] = nil
+            place(zones[1])
+            snapper.move(.left) // the app's first window
+            #expect(h.log.contains("hotkey left: pid 91001 zone 2 on Studio Display (Main) → zone 1"))
+            h.ax.attrs[app]![kAXFocusedWindowAttribute] = window
             place(CGRect(x: -19990, y: -19300, width: 50, height: 50)) // floating
             snapper.move(.left)
             #expect(h.log.contains("floating →"))
@@ -366,7 +386,7 @@ extension Desktop {
                               MemoryLayout<EventHotKeyID>.size, &id)
             #expect(SendEventToEventTarget(ev, GetApplicationEventTarget()) == OSStatus(eventNotHandledErr))
             ReleaseEvent(ev)
-            #expect(h.log.components(separatedBy: "hotkey left:").count == 3)
+            #expect(h.log.components(separatedBy: "hotkey left:").count == 5)
 
             // Frame unreadable, ineligible, no zone, failure.
             h.ax.attrs[window]![kAXSizeAttribute] = nil

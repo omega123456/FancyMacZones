@@ -240,7 +240,11 @@ enum SelfTest {
               Layouts.iou(r(0, 48, 1920, 60), rows10[9]) < Layouts.minIoU && Layouts.currentZone(of: r(0, 48, 1920, 60), in: rows10) == 9)
         check("edges within 8 pt still align (IoU 0.52)", Layouts.currentZone(of: r(6, 48, 1908, 57), in: rows10) == 9)
         check("an edge 10 pt off doesn't align", Layouts.currentZone(of: r(10, 48, 1910, 60), in: rows10) == nil)
-        check("bottom far below the zone doesn't align (IoU 0.53)", Layouts.currentZone(of: r(0, 400, 1920, 680), in: rows3) == nil)
+        check("fixed-size window narrower than its zone, at the top-left corner", Layouts.currentZone(of: r(0, 380, 500, 700), in: cols) == 0)
+        check("minimum-size window wider and taller than its zone, at the top-left corner",
+              Layouts.currentZone(of: r(640, 580, 800, 500), in: cols) == 1 && Layouts.currentZone(of: r(0, 20, 1920, 700), in: rows3) == 1)
+        check("bottom far below the zone: the zone at its top-left corner (IoU 0.53)", Layouts.currentZone(of: r(0, 400, 1920, 680), in: rows3) == 0)
+        check("top-left corner 10 pt off is floating", Layouts.currentZone(of: r(10, 400, 1910, 670), in: rows3) == nil)
         check("small floating window", Layouts.currentZone(of: r(500, 500, 200, 150), in: cols) == nil)
         let tall = r(0, 0, 960, 1080), quarter = r(0, 540, 960, 540) // same left, right and top edges
         check("overlapping canvas zones: the quarter", Layouts.currentZone(of: quarter, in: [tall, quarter]) == 1)
