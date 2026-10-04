@@ -160,8 +160,25 @@ final class Snapper {
     private var hotKeyHandler: EventHandlerRef?
     private var restoreFrames = RestoreFrames()
 
+    // Seams: the WindowServer, event-tap and hotkey calls. Tests replace them so they never install a real tap,
+    // read the real window list or take the real hotkeys.
+    static var createTap: (CGEventMask, CGEventTapCallBack, UnsafeMutableRawPointer) -> CFMachPort? = { mask, callback, info in
+        CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
+                          eventsOfInterest: mask, callback: callback, userInfo: info)
+    }
+    static var enableTap: (CFMachPort, Bool) -> Void = { CGEvent.tapEnable(tap: $0, enable: $1) }
+    static var windowList: (CGWindowListOption, CGWindowID) -> [[String: Any]] = {
+        CGWindowListCopyWindowInfo($0, $1) as? [[String: Any]] ?? []
+    }
+    static var registerHotKey: (_ key: UInt32, _ modifiers: UInt32, EventHotKeyID) -> (OSStatus, EventHotKeyRef?) = { key, modifiers, id in
+        var ref: EventHotKeyRef?
+        let status = RegisterEventHotKey(key, modifiers, id, GetApplicationEventTarget(), 0, &ref)
+        return (status, ref)
+    }
+    static var unregisterHotKey: (EventHotKeyRef) -> Void = { UnregisterEventHotKey($0) }
+
     /// Hotkey IDs index this list (requirement 14).
-    private static let arrows: [(key: Int, direction: Direction)] = [
+    static let arrows: [(key: Int, direction: Direction)] = [
         (kVK_LeftArrow, .left), (kVK_RightArrow, .right), (kVK_UpArrow, .up), (kVK_DownArrow, .down),
     ]
 
@@ -201,9 +218,7 @@ final class Snapper {
     private func installTap() {
         let types: [CGEventType] = [.leftMouseDown, .leftMouseDragged, .leftMouseUp, .rightMouseDown, .rightMouseUp]
         let mask = types.reduce(CGEventMask(0)) { $0 | 1 << $1.rawValue }
-        guard let t = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
-                                        eventsOfInterest: mask, callback: Self.callback,
-                                        userInfo: Unmanaged.passUnretained(self).toOpaque()) else {
+        guard let t = Self.createTap(mask, Self.callback, Unmanaged.passUnretained(self).toOpaque()) else {
             EventLog.write("tap unavailable")
             return
         }
@@ -217,7 +232,7 @@ final class Snapper {
 
     private func removeTap() {
         guard let tap else { return }
-        CGEvent.tapEnable(tap: tap, enable: false)
+        Self.enableTap(tap, false)
         if let tapSource { CFRunLoopRemoveSource(CFRunLoopGetMain(), tapSource, .commonModes) }
         CFMachPortInvalidate(tap)
         self.tap = nil
@@ -225,7 +240,7 @@ final class Snapper {
         EventLog.write("tap removed")
     }
 
-    private static let callback: CGEventTapCallBack = { _, type, event, info in
+    static let callback: CGEventTapCallBack = { _, type, event, info in
         guard let info else { return Unmanaged.passUnretained(event) }
         return Unmanaged<Snapper>.fromOpaque(info).takeUnretainedValue().filter(type, event)
             ? nil : Unmanaged.passUnretained(event)
@@ -233,11 +248,11 @@ final class Snapper {
 
     /// The callback (DD-1, NFR-2): reads event fields, flips flags, swallows or rewrites, and queues the rest to
     /// the main thread. No AX, no WindowServer, no file I/O. Returns true to swallow the event.
-    private func filter(_ type: CGEventType, _ event: CGEvent) -> Bool {
+    func filter(_ type: CGEventType, _ event: CGEvent) -> Bool {
         switch type {
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
-            guard let tap, AXIsProcessTrusted() else { return false } // a revoked grant never re-enables
-            CGEvent.tapEnable(tap: tap, enable: true)
+            guard let tap, AX.isTrusted() else { return false } // a revoked grant never re-enables
+            Self.enableTap(tap, true)
             DispatchQueue.main.async { EventLog.write("tap re-enabled") }
             return false
         case .leftMouseDragged:
@@ -314,7 +329,7 @@ final class Snapper {
         case .confirmed:
             session.displays = store.displays
             session.zones = store.allZones()
-            session.primaryHeight = NSScreen.screens.first?.frame.height ?? 0
+            session.primaryHeight = Env.screens().first?.frame.height ?? 0
             session.rule = Settings.overlapRule
             session.dragToTop = Settings.dragToTop
             session.missionControlGuard = Settings.missionControlGuard
@@ -398,19 +413,18 @@ final class Snapper {
     /// visible frame, or restores it if it is still where this app maximized it. Left alone when macOS itself
     /// minimizes on title-bar double-click.
     private func maximizeTitleBar(at p: CGPoint) {
-        guard UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") != "Minimize" else { return }
+        guard Env.defaults.string(forKey: "AppleActionOnDoubleClick") != "Minimize" else { return }
         do {
             guard let hit = try AX.element(at: p) else { return }
             let role = try AX.string(hit, kAXRoleAttribute)
             guard let window = role == kAXWindowRole ? hit : try AX.element(hit, kAXWindowAttribute) else { return }
             let title = try AX.element(window, kAXTitleUIElementAttribute)
             guard TitleBar.isHit(role: role, isTitle: title.map { CFEqual($0, hit) } ?? false) else { return }
-            var pid: pid_t = 0
-            guard AXUIElementGetPid(window, &pid) == .success, pid != getpid(), try AX.isStandardWindow(window) else {
+            guard let pid = AX.backend.pid(window), pid != getpid(), try AX.isStandardWindow(window) else {
                 return EventLog.write("double-click: title bar window not eligible, left alone")
             }
             guard let ax = try AX.frame(window) else { return EventLog.write("double-click: frame unreadable") }
-            let h = NSScreen.screens.first?.frame.height ?? 0
+            let h = Env.screens().first?.frame.height ?? 0
             let current = Layouts.cocoaRect(fromAX: ax, primaryHeight: h)
             let app = AXUIElementCreateApplication(pid)
             let id = AX.windowID(window) // nil without the private call: maximize only, nothing to restore
@@ -442,13 +456,13 @@ final class Snapper {
     }
 
     private func refreshEdges() {
-        let h = NSScreen.screens.first?.frame.height ?? 0
+        let h = Env.screens().first?.frame.height ?? 0
         edges = Layouts.exposedTopEdges(store.displays.map { Layouts.axRect(fromCocoa: $0.frame, primaryHeight: h) })
     }
 
     /// DD-2: `CGWindowListCopyWindowInfo` limited to one window: its bounds (CG) and owner PID.
     private static func windowInfo(_ id: CGWindowID) -> (bounds: CGRect, pid: pid_t)? {
-        guard let info = (CGWindowListCopyWindowInfo(.optionIncludingWindow, id) as? [[String: Any]])?.first,
+        guard let info = windowList(.optionIncludingWindow, id).first,
               let dict = info[kCGWindowBounds as String] as? NSDictionary,
               let bounds = CGRect(dictionaryRepresentation: dict as CFDictionary),
               let pid = info[kCGWindowOwnerPID as String] as? pid_t else { return nil }
@@ -457,8 +471,7 @@ final class Snapper {
 
     /// The topmost normal-level (layer 0) on-screen window containing a CG point, from one front-to-back list read.
     private static func windowAt(_ p: CGPoint) -> (id: CGWindowID, bounds: CGRect, pid: pid_t)? {
-        let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
-        for info in list as? [[String: Any]] ?? [] {
+        for info in windowList([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) {
             guard info[kCGWindowLayer as String] as? Int == 0,
                   let dict = info[kCGWindowBounds as String] as? NSDictionary,
                   let bounds = CGRect(dictionaryRepresentation: dict as CFDictionary), bounds.contains(p),
@@ -499,10 +512,8 @@ final class Snapper {
         }, 1, &spec, Unmanaged.passUnretained(self).toOpaque(), &hotKeyHandler)
         let modifiers = Settings.moveModifiers
         for (i, arrow) in Self.arrows.enumerated() {
-            var ref: EventHotKeyRef?
-            let status = RegisterEventHotKey(UInt32(arrow.key), UInt32(HotKeyModifiers.carbon(modifiers)),
-                                             EventHotKeyID(signature: 0x464D_5A4E /* FMZN */, id: UInt32(i)),
-                                             GetApplicationEventTarget(), 0, &ref)
+            let (status, ref) = Self.registerHotKey(UInt32(arrow.key), UInt32(HotKeyModifiers.carbon(modifiers)),
+                                                    EventHotKeyID(signature: 0x464D_5A4E /* FMZN */, id: UInt32(i)))
             if let ref { hotKeys.append(ref) } else { EventLog.write("hotkey \(arrow.direction) not registered: \(status)") }
         }
         EventLog.write("hotkeys registered: \(hotKeys.count)/\(Self.arrows.count) \(HotKeyModifiers.symbols(modifiers))")
@@ -510,7 +521,7 @@ final class Snapper {
 
     private func unregisterHotKeys() {
         guard let handler = hotKeyHandler else { return }
-        hotKeys.forEach { UnregisterEventHotKey($0) }
+        hotKeys.forEach(Self.unregisterHotKey)
         hotKeys = []
         RemoveEventHandler(handler)
         hotKeyHandler = nil
@@ -518,7 +529,7 @@ final class Snapper {
     }
 
     /// Requirements 14–17: the focused window moves to the adjacent zone across all displays, with global wrap.
-    private func move(_ direction: Direction) {
+    func move(_ direction: Direction) {
         do {
             guard let (app, window, pid) = try AX.focusedWindow() else {
                 return EventLog.write("hotkey \(direction): no focused window")
@@ -528,7 +539,7 @@ final class Snapper {
                 return EventLog.write("hotkey \(direction): \(name()) window not eligible, left alone")
             }
             guard let ax = try AX.frame(window) else { return EventLog.write("hotkey \(direction): \(name()) frame unreadable") }
-            let h = NSScreen.screens.first?.frame.height ?? 0
+            let h = Env.screens().first?.frame.height ?? 0
             let zones = store.allZones() // DD-3: fetched per gesture
             let frame = Layouts.cocoaRect(fromAX: ax, primaryHeight: h)
             let current = Layouts.currentZone(of: frame, in: zones.map(\.rect))

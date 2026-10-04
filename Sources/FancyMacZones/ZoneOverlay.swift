@@ -23,14 +23,17 @@ struct ZoneStyle {
     private static let pillGap: CGFloat = 8
     private static let symbol = NSImage.SymbolConfiguration(pointSize: 24, weight: .semibold)
 
+    /// Seam: snapshot tests pin the accent so references don't follow the system setting.
+    static var accent: () -> NSColor = { .controlAccentColor }
+
     static func current(for appearance: NSAppearance) -> ZoneStyle {
-        let ws = NSWorkspace.shared
+        let ws = Env.workspace
         var s = ZoneStyle()
         s.dark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
         s.contrast = ws.accessibilityDisplayShouldIncreaseContrast
         s.reduceTransparency = ws.accessibilityDisplayShouldReduceTransparency
         appearance.performAsCurrentDrawingAppearance {
-            s.accent = NSColor.controlAccentColor.cgColor
+            s.accent = Self.accent().cgColor
             s.label = NSColor.labelColor.cgColor
         }
         return s

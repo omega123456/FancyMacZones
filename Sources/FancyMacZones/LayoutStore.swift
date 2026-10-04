@@ -155,7 +155,7 @@ extension LayoutFile.DisplayState: Codable {
 /// Scalar settings in UserDefaults (DD-10), read on every gesture and whenever the menu opens. Each "disabled"
 /// key makes its feature on by default.
 enum Settings {
-    private static var defaults: UserDefaults { .standard }
+    private static var defaults: UserDefaults { Env.defaults }
 
     static var overlapRule: OverlapRule {
         get { defaults.string(forKey: "overlapRule").flatMap(OverlapRule.init) ?? .smallestArea }
@@ -216,7 +216,7 @@ final class LayoutStore {
     #else
     private static let folder = "FancyMacZones"
     #endif
-    static let defaultURL = FileManager.default.homeDirectoryForCurrentUser
+    static var defaultURL = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/\(folder)/layouts.json")
 
     private(set) var file: LayoutFile
@@ -331,7 +331,7 @@ final class LayoutStore {
     }
 
     private func refreshDisplays() {
-        let screens = NSScreen.screens // first = the display with the menu bar
+        let screens = Env.screens() // first = the display with the menu bar
         let order = Self.displayOrder(screens.map(\.frame))
         let names = Self.displayNames(order.map { screens[$0].localizedName }, main: order.firstIndex(of: 0))
         displays = order.enumerated().map { i, s in

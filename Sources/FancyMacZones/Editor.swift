@@ -5,11 +5,17 @@ import AppKit
 /// when closed (DD-12); a single instance. Every action is one store commit (requirement 29).
 final class EditorWindow: NSObject, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate, NSToolbarDelegate,
                           NSTextFieldDelegate {
-    private static var shared: EditorWindow?
+    static var shared: EditorWindow?
     private static var menuInstalled = false
+    /// Seam: tests use a window that is never moved onto a real display.
+    static var windowClass = NSWindow.self
+    /// Seam: tests answer the rename and delete sheets.
+    static var runSheet: (NSAlert, NSWindow, @escaping (NSApplication.ModalResponse) -> Void) -> Void = {
+        $0.beginSheetModal(for: $1, completionHandler: $2)
+    }
 
     private let store: LayoutStore
-    private let window: NSWindow
+    let window: NSWindow
     private let table = NSTableView()
     private let gallery = GalleryScrollView()
     private let content = FlippedView()
@@ -36,19 +42,19 @@ final class EditorWindow: NSObject, NSWindowDelegate, NSTableViewDataSource, NST
         let editor = shared ?? EditorWindow(store: store)
         shared = editor
         if let session = editor.session { session.show() } else { editor.window.makeKeyAndOrderFront(nil) }
-        NSApp.activate() // DD-12: the app stays an LSUIElement agent
+        Env.activate() // DD-12: the app stays an LSUIElement agent
     }
 
     private init(store: LayoutStore) {
         self.store = store
-        window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 760, height: 520),
-                          styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: true)
+        window = Self.windowClass.init(contentRect: CGRect(x: 0, y: 0, width: 760, height: 520),
+                                       styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: true)
         super.init()
         window.title = "Edit Layouts"
         window.contentMinSize = CGSize(width: 640, height: 440)
         window.isReleasedWhenClosed = false
         window.delegate = self
-        if let main = NSScreen.screens.first?.visibleFrame { // centred on the main display
+        if let main = Env.screens().first?.visibleFrame { // centred on the main display
             let size = window.frame.size
             window.setFrameOrigin(CGPoint(x: (main.midX - size.width / 2).rounded(), y: (main.midY - size.height / 2).rounded()))
         }
@@ -59,13 +65,13 @@ final class EditorWindow: NSObject, NSWindowDelegate, NSTableViewDataSource, NST
         nc.addObserver(self, selector: #selector(displaysChanged), name: LayoutStore.displaysDidChange, object: store)
         // DD-12 / DD-15: thumbnails follow the accent colour and the accessibility display options.
         nc.addObserver(self, selector: #selector(storeChanged), name: NSColor.systemColorsDidChangeNotification, object: nil)
-        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(storeChanged),
+        Env.workspace.notificationCenter.addObserver(self, selector: #selector(storeChanged),
                                                           name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil)
         reload()
         EventLog.write("editor: opened")
     }
 
-    deinit { NSWorkspace.shared.notificationCenter.removeObserver(self) }
+    deinit { Env.workspace.notificationCenter.removeObserver(self) }
 
     func windowWillClose(_ notification: Notification) {
         EventLog.write("editor: closed")
@@ -510,7 +516,7 @@ final class EditorWindow: NSObject, NSWindowDelegate, NSTableViewDataSource, NST
         alert.addButton(withTitle: "Rename")
         alert.addButton(withTitle: "Cancel")
         alert.window.initialFirstResponder = field
-        alert.beginSheetModal(for: window) { [weak self] response in
+        Self.runSheet(alert, window) { [weak self] response in
             let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
             guard response == .alertFirstButtonReturn, !name.isEmpty, name != layout.name else { return }
             self?.store.rename(id, to: name)
@@ -528,7 +534,7 @@ final class EditorWindow: NSObject, NSWindowDelegate, NSTableViewDataSource, NST
             : "It is active on \(users.map(\.name).joined(separator: ", ")). Displays using it will switch to Priority Grid."
         alert.addButton(withTitle: "Delete").hasDestructiveAction = true
         alert.addButton(withTitle: "Cancel")
-        alert.beginSheetModal(for: window) { [weak self] response in
+        Self.runSheet(alert, window) { [weak self] response in
             guard response == .alertFirstButtonReturn else { return }
             EventLog.write("editor: delete \(layout.name)")
             self?.store.delete(id)
@@ -552,7 +558,7 @@ final class EditorWindow: NSObject, NSWindowDelegate, NSTableViewDataSource, NST
             }
             EventLog.write("editor: session committed \(layout.name)")
             self.window.makeKeyAndOrderFront(nil)
-            NSApp.activate()
+            Env.activate()
         }
         window.orderOut(nil)
         session?.show()
@@ -560,7 +566,7 @@ final class EditorWindow: NSObject, NSWindowDelegate, NSTableViewDataSource, NST
 }
 
 /// Lays out its document view whenever it is tiled (window resizes, scroller changes).
-private final class GalleryScrollView: NSScrollView {
+final class GalleryScrollView: NSScrollView {
     var onTile: (() -> Void)?
     override func tile() {
         super.tile()
@@ -575,7 +581,7 @@ private final class FlippedView: NSView {
 /// A gallery card (wireframe → Cards, visual reference): a 120 pt wide thumbnail at the display's aspect ratio
 /// (at most 76 pt tall) drawn from the real zones, the name 4 pt below it, and "Active on: …" for custom layouts
 /// used by several displays. The frame carries a margin outside the thumbnail for the 3 pt selection outline.
-private final class LayoutCard: NSView {
+final class LayoutCard: NSView {
     static let slot = CGSize(width: 120, height: 76)
     static let margin: CGFloat = 3
 
@@ -701,7 +707,7 @@ private final class BorderedView: NSView {
 }
 
 /// The ▲▼ arrows of the Zones box: the upper half steps up, the lower half down, within min and max.
-private final class ArrowStepper: NSControl {
+final class ArrowStepper: NSControl {
     var minValue: Double = 0
     var maxValue: Double = 0
     private var value = 0
@@ -739,7 +745,7 @@ private final class ArrowStepper: NSControl {
 }
 
 /// The small bordered buttons of the visual reference: 12 pt text, a 13 pt symbol, a 1 pt border, 6 pt radius.
-private final class ToolButton: NSButton {
+final class ToolButton: NSButton {
     convenience init(_ title: String, symbol: String?, target: AnyObject, action: Selector) {
         self.init(title: title, target: target, action: action)
         isBordered = false
@@ -773,14 +779,14 @@ private final class ToolButton: NSButton {
 }
 
 /// A sidebar cell whose symbol turns white on the accent selection, as its label does.
-private final class SidebarCell: NSTableCellView {
+final class SidebarCell: NSTableCellView {
     override var backgroundStyle: NSView.BackgroundStyle {
         didSet { imageView?.contentTintColor = backgroundStyle == .emphasized ? .white : .labelColor }
     }
 }
 
 /// Sidebar rows: an accent fill with a 6 pt radius inside the sidebar's 8 pt padding, whether or not the window is key.
-private final class SidebarRowView: NSTableRowView {
+final class SidebarRowView: NSTableRowView {
     override var isEmphasized: Bool {
         get { true }
         set {}
@@ -793,7 +799,7 @@ private final class SidebarRowView: NSTableRowView {
 
 /// Records the adjacent-zone modifiers (requirement 14, ADR 7c41d0a2). Click (or press Space/Return while focused)
 /// to record, hold the modifiers, release them all to save. Esc cancels; a set without ⌃, ⌥ or ⌘ beeps.
-private final class ModifierRecorder: NSTextField {
+final class ModifierRecorder: NSTextField {
     var onChange: (() -> Void)?
     private var recording = false { didSet { refresh() } }
     private var peak: NSEvent.ModifierFlags = []
@@ -841,7 +847,7 @@ private final class ModifierRecorder: NSTextField {
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 53 { return stop() } // Esc
         if !recording, event.charactersIgnoringModifiers == " " || event.charactersIgnoringModifiers == "\r" { return start() }
-        NSSound.beep()
+        Env.beep()
     }
 
     override func flagsChanged(with event: NSEvent) {
@@ -850,7 +856,7 @@ private final class ModifierRecorder: NSTextField {
         peak.formUnion(now)
         guard now.isEmpty else { return refresh() }
         defer { peak = [] }
-        guard HotKeyModifiers.isValid(peak) else { NSSound.beep(); return refresh() }
+        guard HotKeyModifiers.isValid(peak) else { Env.beep(); return refresh() }
         EventLog.write("editor: adjacent-zone modifiers → \(HotKeyModifiers.symbols(peak))")
         Settings.moveModifiers = peak
         stop()

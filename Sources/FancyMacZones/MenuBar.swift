@@ -10,13 +10,19 @@ final class MenuBar: NSObject, NSMenuDelegate {
     #else
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     #endif
-    private let menu = NSMenu()
+    let menu = NSMenu()
+
+    // Seams: tests hide the status item and answer the modal panels and alerts.
+    static var showsStatusItem = true
+    static var runPanel: (NSSavePanel) -> URL? = { $0.runModal() == .OK ? $0.url : nil }
+    static var runAlert: (NSAlert) -> NSApplication.ModalResponse = { $0.runModal() }
 
     var trusted = false { didSet { if trusted != oldValue { updateImage() } } }
 
     init(store: LayoutStore) {
         self.store = store
         super.init()
+        item.isVisible = Self.showsStatusItem
         menu.delegate = self
         menu.autoenablesItems = false
         item.menu = menu
@@ -137,11 +143,11 @@ final class MenuBar: NSObject, NSMenuDelegate {
 
     /// Writes the whole `layouts.json` (custom layouts and per-display assignments) to a file the user picks.
     @objc private func exportLayouts() {
-        NSApp.activate() // DD-12: the app stays an LSUIElement agent
+        Env.activate() // DD-12: the app stays an LSUIElement agent
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.json]
         panel.nameFieldStringValue = "FancyMacZones Layouts.json"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard let url = Self.runPanel(panel) else { return }
         guard LayoutStore.save(store.file, to: url) else { return alert("Export Failed", "Could not write \(url.lastPathComponent).") }
         EventLog.write("menu: exported layouts to \(url.lastPathComponent)")
     }
@@ -149,10 +155,10 @@ final class MenuBar: NSObject, NSMenuDelegate {
     /// Replaces every layout and assignment with an exported file, after confirmation. Assignments for
     /// displays that aren't connected are kept and apply when that display is.
     @objc private func importLayouts() {
-        NSApp.activate()
+        Env.activate()
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.json]
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard let url = Self.runPanel(panel) else { return }
         guard let data = try? Data(contentsOf: url), let file = LayoutFile.decode(data) else {
             return alert("Import Failed", "\(url.lastPathComponent) is not a FancyMacZones layouts file.")
         }
@@ -162,7 +168,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
         confirm.informativeText = "Your custom layouts and display assignments will be replaced by the \(file.customLayouts.count) custom layouts in \(url.lastPathComponent). This can’t be undone."
         confirm.addButton(withTitle: "Replace").hasDestructiveAction = true
         confirm.addButton(withTitle: "Cancel")
-        guard confirm.runModal() == .alertFirstButtonReturn else { return }
+        guard Self.runAlert(confirm) == .alertFirstButtonReturn else { return }
         EventLog.write("menu: imported layouts from \(url.lastPathComponent)")
         store.replaceAll(with: file)
     }
@@ -171,7 +177,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
         let a = NSAlert()
         a.messageText = title
         a.informativeText = text
-        a.runModal()
+        _ = Self.runAlert(a)
     }
 
     @objc private func toggleDragToTop() { Settings.dragToTop.toggle() }
@@ -180,9 +186,9 @@ final class MenuBar: NSObject, NSMenuDelegate {
     @objc private func toggleLaunchAtLogin() { LaunchAtLogin.toggle() }
     @objc private func toggleUpdates() { Updater.toggle() }
     @objc private func checkForUpdates() { Updater.check(manual: true) }
-    @objc private func quit() { NSApp.terminate(nil) }
+    @objc private func quit() { Env.terminate() }
 
     @objc private func openAccessibilitySettings() {
-        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+        Env.workspace.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
     }
 }

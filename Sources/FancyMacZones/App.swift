@@ -15,6 +15,17 @@ enum FancyMacZonesMain {
     }
 }
 
+/// What FancyMacZones observes and acts on outside itself. Tests substitute fakes (Tests/FancyMacZonesTests) so
+/// they never touch the real desktop, defaults or focus; production never changes these.
+enum Env {
+    static var workspace = NSWorkspace.shared
+    static var screens: () -> [NSScreen] = { NSScreen.screens }
+    static var defaults = UserDefaults.standard
+    static var activate: () -> Void = { NSApp.activate() }
+    static var terminate: () -> Void = { NSApp.terminate(nil) }
+    static var beep: () -> Void = { NSSound.beep() }
+}
+
 /// `--log-events`: millisecond-timestamped plain-text lines in ~/Library/Logs/FancyMacZones/events.log
 /// (FancyMacZones Dev: ~/Library/Logs/FancyMacZones Dev/events.log), cleared at each launch. The file only exists
 /// while the flag is used (requirement 25).
@@ -25,7 +36,7 @@ enum EventLog {
     #else
     private static let folder = "FancyMacZones"
     #endif
-    private static let url = FileManager.default.homeDirectoryForCurrentUser
+    static var url = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Logs/\(folder)/events.log")
     private static let formatter: DateFormatter = {
         let f = DateFormatter()
@@ -50,24 +61,32 @@ enum EventLog {
 
 /// Launch at Login via SMAppService.mainApp; the status is always read live, never mirrored (requirement 21).
 enum LaunchAtLogin {
-    static var isEnabled: Bool { SMAppService.mainApp.status == .enabled }
+    /// The login-item calls. Tests replace them so xctest is never registered as a login item.
+    struct Service {
+        var status: () -> SMAppService.Status = { SMAppService.mainApp.status }
+        var register: () throws -> Void = { try SMAppService.mainApp.register() }
+        var unregister: () throws -> Void = { try SMAppService.mainApp.unregister() }
+        var openSettings: () -> Void = { SMAppService.openSystemSettingsLoginItems() }
+    }
+    static var service = Service()
+
+    static var isEnabled: Bool { service.status() == .enabled }
 
     /// Enabled → unregister. Requires approval → open Login Items. Otherwise → register
     /// (and open Login Items if the system then asks for approval).
     static func toggle() {
-        let service = SMAppService.mainApp
         do {
-            switch service.status {
+            switch service.status() {
             case .enabled: try service.unregister()
-            case .requiresApproval: SMAppService.openSystemSettingsLoginItems()
+            case .requiresApproval: service.openSettings()
             default:
                 try service.register()
-                if service.status == .requiresApproval { SMAppService.openSystemSettingsLoginItems() }
+                if service.status() == .requiresApproval { service.openSettings() }
             }
         } catch {
             EventLog.write("launch at login failed: \(error)")
         }
-        EventLog.write("launch at login status=\(service.status.rawValue)")
+        EventLog.write("launch at login status=\(service.status().rawValue)")
     }
 }
 
@@ -88,25 +107,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // DD-15: the overlay redraws on accent and accessibility-display changes (appearance is per view).
         NotificationCenter.default.addObserver(self, selector: #selector(themeChanged),
                                                name: NSColor.systemColorsDidChangeNotification, object: nil)
-        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(themeChanged),
-                                                          name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil)
+        Env.workspace.notificationCenter.addObserver(self, selector: #selector(themeChanged),
+                                                     name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil)
         Updater.start() // independent of Accessibility trust
         AX.onAPIDisabled = { [weak self] in
-            DispatchQueue.main.async { self?.updateTrust(AXIsProcessTrusted()) }
+            DispatchQueue.main.async { self?.updateTrust(AX.isTrusted()) }
         }
         // Agent app: distributed notifications must be delivered immediately, not on activation.
         DistributedNotificationCenter.default().addObserver(
             self, selector: #selector(accessibilityChanged),
             name: Notification.Name("com.apple.accessibility.api"), object: nil,
             suspensionBehavior: .deliverImmediately)
-        updateTrust(AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)) // requirement 20
+        updateTrust(AX.isTrusted(true)) // requirement 20
     }
 
     @objc private func themeChanged() { overlay.themeChanged() }
 
     @objc private func accessibilityChanged() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
-            self?.updateTrust(AXIsProcessTrusted())
+            self?.updateTrust(AX.isTrusted())
         }
     }
 
@@ -124,7 +143,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if grantPoll == nil {
                 EventLog.write("waiting for accessibility (1 s poll)")
                 let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
-                    if AXIsProcessTrusted() { self?.updateTrust(true) }
+                    if AX.isTrusted() { self?.updateTrust(true) }
                 }
                 timer.tolerance = 0.2
                 RunLoop.main.add(timer, forMode: .common)

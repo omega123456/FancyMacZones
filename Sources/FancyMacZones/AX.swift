@@ -14,6 +14,36 @@ enum AX {
     /// Called (synchronously) whenever any AX call reports "API disabled".
     static var onAPIDisabled: (() -> Void)?
 
+    /// The Accessibility C calls everything below goes through. Tests replace it with a fake Accessibility world.
+    struct Backend {
+        var copy: (AXUIElement, String) -> (AXError, CFTypeRef?) = { el, attr in
+            var value: CFTypeRef?
+            return (AXUIElementCopyAttributeValue(el, attr as CFString, &value), value)
+        }
+        var copyMultiple: (AXUIElement, [String]) -> (AXError, CFArray?) = { el, attrs in
+            var out: CFArray?
+            return (AXUIElementCopyMultipleAttributeValues(el, attrs as CFArray, AXCopyMultipleAttributeOptions(rawValue: 0), &out), out)
+        }
+        var set: (AXUIElement, String, CFTypeRef) -> AXError = { AXUIElementSetAttributeValue($0, $1 as CFString, $2) }
+        var elementAt: (CGPoint) -> (AXError, AXUIElement?) = { p in
+            var el: AXUIElement?
+            return (AXUIElementCopyElementAtPosition(AXUIElementCreateSystemWide(), Float(p.x), Float(p.y), &el), el)
+        }
+        var windowID: (AXUIElement) -> CGWindowID? = { el in
+            var id: CGWindowID = 0
+            guard let fn = getWindowFn, fn(el, &id) == .success, id != 0 else { return nil }
+            return id
+        }
+        var pid: (AXUIElement) -> pid_t? = { el in
+            var pid: pid_t = 0
+            return AXUIElementGetPid(el, &pid) == .success ? pid : nil
+        }
+        var isTrusted: (_ prompt: Bool) -> Bool = { AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": $0] as CFDictionary) }
+    }
+    static var backend = Backend()
+
+    static func isTrusted(_ prompt: Bool = false) -> Bool { backend.isTrusted(prompt) }
+
     @discardableResult
     static func check(_ err: AXError) throws -> Bool {
         switch err {
@@ -35,19 +65,15 @@ enum AX {
         return unsafeBitCast(sym, to: GetWindowFn.self)
     }()
 
-    static var isWindowIDAvailable: Bool { getWindowFn != nil }
+    static var isWindowIDAvailable = getWindowFn != nil
 
-    static func windowID(_ el: AXUIElement) -> CGWindowID? {
-        var id: CGWindowID = 0
-        guard let fn = getWindowFn, fn(el, &id) == .success, id != 0 else { return nil }
-        return id
-    }
+    static func windowID(_ el: AXUIElement) -> CGWindowID? { backend.windowID(el) }
 
     // MARK: Attribute reads
 
     static func raw(_ el: AXUIElement, _ attr: String) throws -> CFTypeRef? {
-        var value: CFTypeRef?
-        return try check(AXUIElementCopyAttributeValue(el, attr as CFString, &value)) ? value : nil
+        let (err, value) = backend.copy(el, attr)
+        return try check(err) ? value : nil
     }
 
     static func string(_ el: AXUIElement, _ attr: String) throws -> String? { try raw(el, attr) as? String }
@@ -60,8 +86,7 @@ enum AX {
     /// Several attributes in one IPC round trip. nil if the whole call failed;
     /// individual attributes that failed come back as nil entries.
     static func values(_ el: AXUIElement, _ attrs: [String]) throws -> [CFTypeRef?]? {
-        var out: CFArray?
-        let err = AXUIElementCopyMultipleAttributeValues(el, attrs as CFArray, AXCopyMultipleAttributeOptions(rawValue: 0), &out)
+        let (err, out) = backend.copyMultiple(el, attrs)
         guard try check(err), let array = out as? [AnyObject], array.count == attrs.count else { return nil }
         return array.map { v in
             if CFGetTypeID(v) == AXValueGetTypeID(), AXValueGetType(unsafeBitCast(v, to: AXValue.self)) == .axError { return nil }
@@ -100,16 +125,15 @@ enum AX {
 
     /// The deepest element at a point in AX (top-left global) coordinates.
     static func element(at p: CGPoint) throws -> AXUIElement? {
-        var el: AXUIElement?
-        return try check(AXUIElementCopyElementAtPosition(AXUIElementCreateSystemWide(), Float(p.x), Float(p.y), &el)) ? el : nil
+        let (err, el) = backend.elementAt(p)
+        return try check(err) ? el : nil
     }
 
     /// The focused window of the frontmost app: system-wide → focused application → focused window.
     static func focusedWindow() throws -> (app: AXUIElement, window: AXUIElement, pid: pid_t)? {
         guard let app = try element(AXUIElementCreateSystemWide(), kAXFocusedApplicationAttribute),
-              let window = try element(app, kAXFocusedWindowAttribute) else { return nil }
-        var pid: pid_t = 0
-        guard AXUIElementGetPid(app, &pid) == .success else { return nil }
+              let window = try element(app, kAXFocusedWindowAttribute),
+              let pid = backend.pid(app) else { return nil }
         return (app, window, pid)
     }
 
@@ -136,19 +160,19 @@ enum AX {
     /// Writes log every failure (ordinary ones would otherwise vanish as `false`).
     @discardableResult
     static func set(_ el: AXUIElement, _ attr: String, _ value: Bool) throws -> Bool {
-        try checkLogged(AXUIElementSetAttributeValue(el, attr as CFString, (value ? kCFBooleanTrue : kCFBooleanFalse)!), "set \(attr)")
+        try checkLogged(backend.set(el, attr, (value ? kCFBooleanTrue : kCFBooleanFalse)!), "set \(attr)")
     }
 
     @discardableResult
     static func set(_ el: AXUIElement, _ attr: String, _ value: CGSize) throws -> Bool {
         var v = value
-        return try checkLogged(AXUIElementSetAttributeValue(el, attr as CFString, AXValueCreate(.cgSize, &v)!), "set \(attr)")
+        return try checkLogged(backend.set(el, attr, AXValueCreate(.cgSize, &v)!), "set \(attr)")
     }
 
     @discardableResult
     static func set(_ el: AXUIElement, _ attr: String, _ value: CGPoint) throws -> Bool {
         var v = value
-        return try checkLogged(AXUIElementSetAttributeValue(el, attr as CFString, AXValueCreate(.cgPoint, &v)!), "set \(attr)")
+        return try checkLogged(backend.set(el, attr, AXValueCreate(.cgPoint, &v)!), "set \(attr)")
     }
 
     @discardableResult

@@ -12,14 +12,17 @@ enum Updater {
     private static var busy = false // a check, prompt or install is in progress
     private static var prompt: (note: CFUserNotification, source: CFRunLoopSource, onUpdate: () -> Void)?
 
-    static var isEnabled: Bool { !UserDefaults.standard.bool(forKey: disabledKey) }
-    private static var current: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0" }
+    static var isEnabled: Bool { !Env.defaults.bool(forKey: disabledKey) }
+    static var current = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
+    /// The bundle an update replaces. Tests point it, and the seams below, at fakes.
+    static var bundleURL = Bundle.main.bundleURL
+    static var session = URLSession.shared
     /// `swift run` has no .app bundle: nothing to replace. Debug builds are FancyMacZones Dev and never update.
     #if DEBUG
-    private static let isInstallable = false
+    static var isInstallable = false
     private static let notInstallableReason = "This is a development build."
     #else
-    private static var isInstallable: Bool { Bundle.main.bundleURL.pathExtension == "app" }
+    static var isInstallable = bundleURL.pathExtension == "app"
     private static let notInstallableReason = "This copy of FancyMacZones is not an installed app."
     #endif
 
@@ -33,7 +36,7 @@ enum Updater {
     }
 
     static func toggle() {
-        UserDefaults.standard.set(isEnabled, forKey: disabledKey)
+        Env.defaults.set(isEnabled, forKey: disabledKey)
         EventLog.write("automatic updates \(isEnabled ? "on" : "off")")
         if isEnabled { start() } else { timer?.invalidate(); timer = nil }
     }
@@ -50,7 +53,7 @@ enum Updater {
         busy = true
         var request = URLRequest(url: URL(string: "https://api.github.com/repos/\(repo)/releases/latest")!)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        URLSession.shared.dataTask(with: request) { data, response, error in
+        session.dataTask(with: request) { data, response, error in
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             let release = status == 200 ? data.flatMap { try? JSONDecoder().decode(Release.self, from: $0) } : nil
             DispatchQueue.main.async {
@@ -77,7 +80,9 @@ enum Updater {
 
     private static var iconURL: URL? { Bundle.main.url(forResource: "AppIcon", withExtension: "icns") }
 
-    private static func ask(_ version: String, onUpdate: @escaping () -> Void) {
+    static var ask: (_ version: String, _ onUpdate: @escaping () -> Void) -> Void = showPrompt
+
+    private static func showPrompt(_ version: String, onUpdate: @escaping () -> Void) {
         var dict: [CFString: Any] = [
             kCFUserNotificationAlertHeaderKey: "FancyMacZones \(version) is available",
             kCFUserNotificationAlertMessageKey: "You have \(current). Do you want to update now?",
@@ -101,7 +106,7 @@ enum Updater {
     }
 
     /// One-button, non-blocking.
-    private static func notice(_ header: String, _ message: String) {
+    static var notice: (_ header: String, _ message: String) -> Void = { header, message in
         CFUserNotificationDisplayNotice(0, kCFUserNotificationPlainAlertLevel, iconURL as CFURL?, nil, nil,
                                         header as CFString, message as CFString, "OK" as CFString)
     }
@@ -116,7 +121,7 @@ enum Updater {
     private static func install(_ zip: URL, version: String) {
         busy = true
         EventLog.write("update: downloading \(zip)")
-        URLSession.shared.downloadTask(with: zip) { file, _, error in
+        session.downloadTask(with: zip) { file, _, error in
             // The downloaded file is deleted when this returns, so unpack and verify here (off the main thread).
             let result = Result { try unpack(file, error, version) }
             DispatchQueue.main.async {
@@ -136,7 +141,7 @@ enum Updater {
         guard let file else { throw error ?? UpdateError("The download failed.") }
         let fm = FileManager.default
         let dir = try fm.url(for: .itemReplacementDirectory, in: .userDomainMask,
-                             appropriateFor: Bundle.main.bundleURL, create: true)
+                             appropriateFor: bundleURL, create: true)
         do {
             let zip = dir.appendingPathComponent("update.zip")
             try fm.moveItem(at: file, to: zip)
@@ -158,8 +163,10 @@ enum Updater {
         }
     }
 
+    static var verify = verifySignature
+
     /// The new bundle must be validly signed and satisfy this running app's designated requirement.
-    private static func verify(_ app: URL) throws {
+    static func verifySignature(_ app: URL) throws {
         var me: SecCode?, meStatic: SecStaticCode?, requirement: SecRequirement?, new: SecStaticCode?
         guard SecCodeCopySelf([], &me) == errSecSuccess, let me,
               SecCodeCopyStaticCode(me, [], &meStatic) == errSecSuccess, let meStatic,
@@ -172,23 +179,27 @@ enum Updater {
     }
 
     private static func replaceAndRelaunch(with app: URL) {
-        let dest = Bundle.main.bundleURL
+        let dest = bundleURL
         do {
             _ = try FileManager.default.replaceItemAt(dest, withItemAt: app)
             try? FileManager.default.removeItem(at: app.deletingLastPathComponent())
-            // Wait for this process to exit, then open the new bundle.
-            let relaunch = Process()
-            relaunch.executableURL = URL(fileURLWithPath: "/bin/sh")
-            relaunch.arguments = ["-c", "while kill -0 \"$1\" 2>/dev/null; do sleep 0.2; done; open \"$0\"",
-                                  dest.path, String(getpid())]
-            try relaunch.run()
+            try relaunch(dest)
         } catch {
             EventLog.write("update install failed: \(error)")
             notice("FancyMacZones update failed", error.localizedDescription)
             return
         }
         EventLog.write("update installed, relaunching")
-        NSApp.terminate(nil)
+        Env.terminate()
+    }
+
+    /// Waits for this process to exit, then opens the new bundle.
+    static var relaunch: (URL) throws -> Void = { dest in
+        let relaunch = Process()
+        relaunch.executableURL = URL(fileURLWithPath: "/bin/sh")
+        relaunch.arguments = ["-c", "while kill -0 \"$1\" 2>/dev/null; do sleep 0.2; done; open \"$0\"",
+                              dest.path, String(getpid())]
+        try relaunch.run()
     }
 
     // MARK: Pure logic (covered by --self-test)

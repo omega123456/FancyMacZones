@@ -73,16 +73,16 @@ final class ZoneEditorSession: NSObject, NSWindowDelegate {
         // DD-12 / DD-15: redraw on accent and accessibility-display changes while the session exists.
         NotificationCenter.default.addObserver(self, selector: #selector(themeChanged),
                                                name: NSColor.systemColorsDidChangeNotification, object: nil)
-        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(themeChanged),
+        Env.workspace.notificationCenter.addObserver(self, selector: #selector(themeChanged),
                                                           name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil)
     }
 
-    deinit { NSWorkspace.shared.notificationCenter.removeObserver(self) }
+    deinit { Env.workspace.notificationCenter.removeObserver(self) }
 
     func show() {
         window.makeKeyAndOrderFront(nil)
         window.makeFirstResponder(editor)
-        NSApp.activate()
+        Env.activate()
     }
 
     /// Done, Return, Esc or close: hand the working copy back once.
@@ -106,7 +106,7 @@ final class ZoneEditorSession: NSObject, NSWindowDelegate {
 // MARK: Control bar
 
 /// The top control bar (wireframe → Custom Grid editor): one solid, appearance-aware capsule, 36 pt tall.
-private final class ControlBar: NSView {
+final class ControlBar: NSView {
     init(_ views: [NSView], leftInset: CGFloat) {
         super.init(frame: .zero)
         wantsLayer = true
@@ -128,7 +128,7 @@ private final class ControlBar: NSView {
 
     override func updateLayer() { // runs with the effective appearance current
         guard let layer else { return }
-        let thick = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+        let thick = Env.workspace.accessibilityDisplayShouldIncreaseContrast
         layer.cornerRadius = 18
         layer.backgroundColor = NSColor.windowBackgroundColor.cgColor
         layer.borderColor = (thick ? NSColor.labelColor : NSColor.separatorColor).cgColor
@@ -149,7 +149,7 @@ private final class ControlBar: NSView {
 }
 
 /// The Canvas bar's 28 pt circular "+" (accent fill, white `plus`), read as "Add Zone" (NFR-6).
-private final class AddButton: NSButton {
+final class AddButton: NSButton {
     convenience init(target: AnyObject, action: Selector) {
         self.init(frame: CGRect(x: 0, y: 0, width: 28, height: 28))
         self.target = target
@@ -293,6 +293,9 @@ final class GridEditorView: ZoneEditorView {
     private var horizontal = false // Shift held: split previews and clicks are horizontal
     private var drag: Drag?
 
+    /// Seam: tests pick from the popup instead of tracking it modally.
+    static var popUp: (NSMenu, CGPoint, NSView) -> Void = { _ = $0.popUp(positioning: nil, at: $1, in: $2) }
+
     private enum Drag {
         case divider(Divider, start: GridLayout)
         case press(zone: Int, at: CGPoint)
@@ -325,7 +328,7 @@ final class GridEditorView: ZoneEditorView {
 
     private func split(_ zone: Int, at p: CGPoint, _ orientation: Orientation) {
         let position = orientation == .vertical ? p.x / area.width : p.y / area.height
-        guard let g = grid.splitting(zone, orientation, at: position, area: area) else { return NSSound.beep() } // < 64 pt
+        guard let g = grid.splitting(zone, orientation, at: position, area: area) else { return Env.beep() } // < 64 pt
         apply(g)
     }
 
@@ -397,7 +400,7 @@ final class GridEditorView: ZoneEditorView {
         let item = menu.addItem(withTitle: "Merge", action: #selector(mergeChosen), keyEquivalent: "")
         item.target = self
         item.representedObject = selection
-        menu.popUp(positioning: nil, at: p, in: self)
+        Self.popUp(menu, p, self)
     }
 
     @objc private func mergeChosen(_ sender: NSMenuItem) {
@@ -438,7 +441,7 @@ final class GridEditorView: ZoneEditorView {
         let shift = event.modifierFlags.contains(.shift)
         switch event.keyCode {
         case 51, 117: // Delete merges across the focused divider, if the union is a rectangle (requirement 3)
-            guard case .divider(let d)? = focus, let g = grid.deleting(d) else { NSSound.beep(); return true }
+            guard case .divider(let d)? = focus, let g = grid.deleting(d) else { Env.beep(); return true }
             let (a, b) = segment(d)
             apply(g)
             focus = grid.hitTest(CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2), area: area)
@@ -582,7 +585,7 @@ final class CanvasEditorView: ZoneEditorView {
     }
 
     @objc private func deleteSelected() {
-        guard let s = selected else { return NSSound.beep() }
+        guard let s = selected else { return Env.beep() }
         var c = canvas
         c.delete(s)
         selected = nil
@@ -713,7 +716,7 @@ final class CanvasEditorView: ZoneEditorView {
         case 51, 117: deleteSelected()
         case 123, 124, 125, 126:
             // Arrows move 10 pt, ⌥ 1 pt; ⇧ resizes 10 pt, ⌥⇧ 2 pt (requirement 28; never ⌃, which macOS reserves).
-            guard let s = selected else { NSSound.beep(); return true }
+            guard let s = selected else { Env.beep(); return true }
             let resize = event.modifierFlags.contains(.shift), fine = event.modifierFlags.contains(.option)
             let step: CGFloat = resize ? (fine ? 2 : 10) : (fine ? 1 : 10)
             let v = [123: CGVector(dx: -step, dy: 0), 124: CGVector(dx: step, dy: 0),
