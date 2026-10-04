@@ -96,6 +96,37 @@ struct DragSession {
     }
 }
 
+/// Double-click to maximize: whether the element under the second click is window chrome, i.e. the window itself
+/// (empty title bar), its toolbar background, or its title text. Pure, covered by --self-test.
+enum TitleBar {
+    static func isHit(role: String?, isTitle: Bool) -> Bool {
+        isTitle || role == kAXWindowRole || role == kAXToolbarRole
+    }
+}
+
+/// Pre-maximize frames (global Cocoa) by window ID, so a title-bar double-click on a window still at the frame
+/// it was maximized to restores it. There are no AX observers (NFR-1), so closed windows go unnoticed: entries are
+/// consumed by the next double-click on their window, the oldest is dropped past `capacity`, and `stop()` clears
+/// them all. Pure, covered by --self-test.
+struct RestoreFrames {
+    var capacity = 16
+    private(set) var entries: [(id: CGWindowID, previous: CGRect, maximized: CGRect)] = []
+
+    mutating func save(_ id: CGWindowID, previous: CGRect, maximized: CGRect) {
+        entries.removeAll { $0.id == id }
+        entries.append((id, previous, maximized))
+        if entries.count > capacity { entries.removeFirst() }
+    }
+
+    /// The previous frame if the window still sits in the frame it was maximized to (the current-zone rule, so an
+    /// app that rounded the size still matches). Consumes the entry either way.
+    mutating func take(_ id: CGWindowID, current: CGRect) -> CGRect? {
+        guard let i = entries.firstIndex(where: { $0.id == id }) else { return nil }
+        let e = entries.remove(at: i)
+        return Layouts.currentZone(of: current, in: [e.maximized]) != nil ? e.previous : nil
+    }
+}
+
 /// The arrow hotkeys' modifiers (requirement 14), chosen by the owner in the Edit Layouts window (ADR 7c41d0a2).
 /// The arrows themselves are fixed. Pure, covered by --self-test.
 enum HotKeyModifiers {
@@ -127,6 +158,7 @@ final class Snapper {
     private var edges: [TopEdgeSegment] = []
     private var hotKeys: [EventHotKeyRef] = []
     private var hotKeyHandler: EventHandlerRef?
+    private var restoreFrames = RestoreFrames()
 
     /// Hotkey IDs index this list (requirement 14).
     private static let arrows: [(key: Int, direction: Direction)] = [
@@ -151,6 +183,7 @@ final class Snapper {
     }
 
     func stop() {
+        restoreFrames = RestoreFrames()
         cancel("stopped")
         removeTap()
         unregisterHotKeys()
@@ -233,7 +266,8 @@ final class Snapper {
                 let id = CGWindowID(truncatingIfNeeded: event.getIntegerValueField(.mouseEventWindowUnderMousePointerThatCanHandleThisEvent))
                 DispatchQueue.main.async { self.began(p, window: id) }
             case .leftMouseUp:
-                DispatchQueue.main.async { self.ended(p) }
+                let clicks = event.getIntegerValueField(.mouseEventClickState)
+                DispatchQueue.main.async { self.ended(p, clicks: clicks) }
             default:
                 if toggle { DispatchQueue.main.async { self.toggleZones() } }
             }
@@ -320,12 +354,16 @@ final class Snapper {
     }
 
     /// Requirement 10: re-evaluated at the release point; the overlay hides either way.
-    private func ended(_ p: CGPoint) {
+    private func ended(_ p: CGPoint, clicks: Int64) {
         defer {
             overlay.hide()
             session = DragSession()
         }
-        guard session.phase == .confirmed else { return }
+        guard session.phase == .confirmed else {
+            // Every second click: a quick second double-click on the same spot counts on as clicks 3 and 4.
+            if clicks > 0, clicks % 2 == 0, Settings.doubleClickMaximize { maximizeTitleBar(at: p) }
+            return
+        }
         guard let e = evaluate(p) else { return EventLog.write("drop: off every display, normal drag") }
         let target: CGRect, what: String
         switch (e.overlay, e.active) {
@@ -346,9 +384,47 @@ final class Snapper {
                 return
             }
             try write(target, app: app, window: window, primaryHeight: session.primaryHeight)
+            if e.overlay == .maximize, let baseline = session.baseline {
+                restoreFrames.save(session.windowID, previous: Layouts.cocoaRect(fromAX: baseline, primaryHeight: session.primaryHeight),
+                                   maximized: target)
+            }
             EventLog.write("drop: \(what) → \(target)")
         } catch {
             EventLog.write("drop: \(what) failed: \(error)")
+        }
+    }
+
+    /// A double-click (second left-up, no window drag) on a title bar maximizes that window to its display's
+    /// visible frame, or restores it if it is still where this app maximized it. Left alone when macOS itself
+    /// minimizes on title-bar double-click.
+    private func maximizeTitleBar(at p: CGPoint) {
+        guard UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") != "Minimize" else { return }
+        do {
+            guard let hit = try AX.element(at: p) else { return }
+            let role = try AX.string(hit, kAXRoleAttribute)
+            guard let window = role == kAXWindowRole ? hit : try AX.element(hit, kAXWindowAttribute) else { return }
+            let title = try AX.element(window, kAXTitleUIElementAttribute)
+            guard TitleBar.isHit(role: role, isTitle: title.map { CFEqual($0, hit) } ?? false) else { return }
+            var pid: pid_t = 0
+            guard AXUIElementGetPid(window, &pid) == .success, pid != getpid(), try AX.isStandardWindow(window) else {
+                return EventLog.write("double-click: title bar window not eligible, left alone")
+            }
+            guard let ax = try AX.frame(window) else { return EventLog.write("double-click: frame unreadable") }
+            let h = NSScreen.screens.first?.frame.height ?? 0
+            let current = Layouts.cocoaRect(fromAX: ax, primaryHeight: h)
+            let app = AXUIElementCreateApplication(pid)
+            let id = AX.windowID(window) // nil without the private call: maximize only, nothing to restore
+            if let id, let previous = restoreFrames.take(id, current: current) {
+                try write(previous, app: app, window: window, primaryHeight: h)
+                return EventLog.write("double-click: restore window=\(id) → \(previous)")
+            }
+            let displays = store.displays
+            guard let d = Layouts.display(at: Layouts.cocoaPoint(fromCG: p, primaryHeight: h), frames: displays.map(\.frame)) else { return }
+            try write(displays[d].usable, app: app, window: window, primaryHeight: h)
+            if let id { restoreFrames.save(id, previous: current, maximized: displays[d].usable) }
+            EventLog.write("double-click: maximize window=\(id.map(String.init) ?? "?") on \(displays[d].name) → \(displays[d].usable) (\(restoreFrames.entries.count) remembered)")
+        } catch {
+            EventLog.write("double-click: maximize failed: \(error)")
         }
     }
 

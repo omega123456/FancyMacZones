@@ -98,6 +98,12 @@ enum AX {
         return CGRect(origin: origin, size: size)
     }
 
+    /// The deepest element at a point in AX (top-left global) coordinates.
+    static func element(at p: CGPoint) throws -> AXUIElement? {
+        var el: AXUIElement?
+        return try check(AXUIElementCopyElementAtPosition(AXUIElementCreateSystemWide(), Float(p.x), Float(p.y), &el)) ? el : nil
+    }
+
     /// The focused window of the frontmost app: system-wide → focused application → focused window.
     static func focusedWindow() throws -> (app: AXUIElement, window: AXUIElement, pid: pid_t)? {
         guard let app = try element(AXUIElementCreateSystemWide(), kAXFocusedApplicationAttribute),

@@ -67,6 +67,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
         menu.addItem(.separator())
 
         add("Drag to Top to Maximize", #selector(toggleDragToTop), to: menu, on: Settings.dragToTop)
+        add("Double-Click Title Bar to Maximize", #selector(toggleDoubleClickMaximize), to: menu, on: Settings.doubleClickMaximize)
         add("Prevent Mission Control While Dragging", #selector(toggleMissionControl), to: menu, on: Settings.missionControlGuard)
         menu.addItem(.separator())
         add("\(HotKeyModifiers.symbols(Settings.moveModifiers)) ←→↑↓  Move Window to Adjacent Zone", to: menu).isEnabled = false
@@ -174,6 +175,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
     }
 
     @objc private func toggleDragToTop() { Settings.dragToTop.toggle() }
+    @objc private func toggleDoubleClickMaximize() { Settings.doubleClickMaximize.toggle() }
     @objc private func toggleMissionControl() { Settings.missionControlGuard.toggle() }
     @objc private func toggleLaunchAtLogin() { LaunchAtLogin.toggle() }
     @objc private func toggleUpdates() { Updater.toggle() }

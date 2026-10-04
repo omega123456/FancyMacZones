@@ -174,6 +174,12 @@ enum Settings {
         set { defaults.set(!newValue, forKey: "missionControlGuardDisabled") }
     }
 
+    /// Double-clicking a window's title bar maximizes it to the visible frame.
+    static var doubleClickMaximize: Bool {
+        get { !defaults.bool(forKey: "doubleClickMaximizeDisabled") }
+        set { defaults.set(!newValue, forKey: "doubleClickMaximizeDisabled") }
+    }
+
     static let moveModifiersDidChange = Notification.Name("FancyMacZones.moveModifiersDidChange")
 
     /// Requirement 14: the modifiers held with the arrows. A stored value that isn't valid reads as ⌃⌘.
