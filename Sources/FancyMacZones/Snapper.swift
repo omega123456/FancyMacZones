@@ -96,9 +96,25 @@ struct DragSession {
     }
 }
 
+/// The arrow hotkeys' modifiers (requirement 14), chosen by the owner in the Edit Layouts window (ADR 7c41d0a2).
+/// The arrows themselves are fixed. Pure, covered by --self-test.
+enum HotKeyModifiers {
+    static let relevant: NSEvent.ModifierFlags = [.control, .option, .shift, .command]
+    static let `default`: NSEvent.ModifierFlags = [.control, .command]
+    private static let order: [(NSEvent.ModifierFlags, String, Int)] = [
+        (.control, "⌃", controlKey), (.option, "⌥", optionKey), (.shift, "⇧", shiftKey), (.command, "⌘", cmdKey),
+    ]
+
+    /// At least one of ⌃⌥⌘: bare or Shift-only arrows would take over cursor movement and text selection.
+    static func isValid(_ m: NSEvent.ModifierFlags) -> Bool { !m.isDisjoint(with: [.control, .option, .command]) }
+    /// In the system order, ⌃⌥⇧⌘.
+    static func symbols(_ m: NSEvent.ModifierFlags) -> String { order.filter { m.contains($0.0) }.map(\.1).joined() }
+    static func carbon(_ m: NSEvent.ModifierFlags) -> Int { order.filter { m.contains($0.0) }.reduce(0) { $0 | $1.2 } }
+}
+
 /// All window-moving behaviour: the mouse-only event tap (DD-1), the drag session and its confirmation (DD-2),
 /// the overlay and top hot spot (requirements 8–11), the Mission Control rewrite (requirement 12, DD-7), drops
-/// and frame writes (requirements 10, 13, DD-4) and the Ctrl+Cmd+Arrow hotkeys (requirements 14–17, DD-8).
+/// and frame writes (requirements 10, 13, DD-4) and the modifier+Arrow hotkeys (requirements 14–17, DD-8).
 /// Started while Accessibility is trusted, stopped when it isn't (requirement 20). Main thread only.
 final class Snapper {
     private let store: LayoutStore
@@ -122,6 +138,8 @@ final class Snapper {
         self.overlay = overlay
         NotificationCenter.default.addObserver(self, selector: #selector(displaysChanged),
                                                name: LayoutStore.displaysDidChange, object: store)
+        NotificationCenter.default.addObserver(self, selector: #selector(reloadHotKeys),
+                                               name: Settings.moveModifiersDidChange, object: nil)
     }
 
     /// Requirement 20. Both are idempotent.
@@ -136,6 +154,13 @@ final class Snapper {
         cancel("stopped")
         removeTap()
         unregisterHotKeys()
+    }
+
+    /// Re-registers the hotkeys with the new `Settings.moveModifiers`, if they are registered at all.
+    @objc private func reloadHotKeys() {
+        guard hotKeyHandler != nil else { return }
+        unregisterHotKeys()
+        registerHotKeys()
     }
 
     // MARK: Tap (DD-1)
@@ -396,14 +421,15 @@ final class Snapper {
             Unmanaged<Snapper>.fromOpaque(info).takeUnretainedValue().move(Snapper.arrows[Int(id.id)].direction)
             return noErr
         }, 1, &spec, Unmanaged.passUnretained(self).toOpaque(), &hotKeyHandler)
+        let modifiers = Settings.moveModifiers
         for (i, arrow) in Self.arrows.enumerated() {
             var ref: EventHotKeyRef?
-            let status = RegisterEventHotKey(UInt32(arrow.key), UInt32(controlKey | cmdKey),
+            let status = RegisterEventHotKey(UInt32(arrow.key), UInt32(HotKeyModifiers.carbon(modifiers)),
                                              EventHotKeyID(signature: 0x464D_5A4E /* FMZN */, id: UInt32(i)),
                                              GetApplicationEventTarget(), 0, &ref)
             if let ref { hotKeys.append(ref) } else { EventLog.write("hotkey \(arrow.direction) not registered: \(status)") }
         }
-        EventLog.write("hotkeys registered: \(hotKeys.count)/\(Self.arrows.count)")
+        EventLog.write("hotkeys registered: \(hotKeys.count)/\(Self.arrows.count) \(HotKeyModifiers.symbols(modifiers))")
     }
 
     private func unregisterHotKeys() {

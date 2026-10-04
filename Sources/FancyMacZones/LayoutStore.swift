@@ -173,6 +173,21 @@ enum Settings {
         get { !defaults.bool(forKey: "missionControlGuardDisabled") }
         set { defaults.set(!newValue, forKey: "missionControlGuardDisabled") }
     }
+
+    static let moveModifiersDidChange = Notification.Name("FancyMacZones.moveModifiersDidChange")
+
+    /// Requirement 14: the modifiers held with the arrows. A stored value that isn't valid reads as ⌃⌘.
+    static var moveModifiers: NSEvent.ModifierFlags {
+        get {
+            let m = NSEvent.ModifierFlags(rawValue: UInt(max(defaults.integer(forKey: "moveModifiers"), 0)))
+                .intersection(HotKeyModifiers.relevant)
+            return HotKeyModifiers.isValid(m) ? m : HotKeyModifiers.default
+        }
+        set {
+            defaults.set(Int(newValue.intersection(HotKeyModifiers.relevant).rawValue), forKey: "moveModifiers")
+            NotificationCenter.default.post(name: moveModifiersDidChange, object: nil)
+        }
+    }
 }
 
 /// Owns the persisted layouts (DD-10, ADR 60d109d4) and display identity (requirements 1, 19). Read once at

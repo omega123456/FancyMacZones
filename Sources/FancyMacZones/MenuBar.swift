@@ -69,7 +69,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
         add("Drag to Top to Maximize", #selector(toggleDragToTop), to: menu, on: Settings.dragToTop)
         add("Prevent Mission Control While Dragging", #selector(toggleMissionControl), to: menu, on: Settings.missionControlGuard)
         menu.addItem(.separator())
-        add("⌃⌘ ←→↑↓  Move Window to Adjacent Zone", to: menu).isEnabled = false
+        add("\(HotKeyModifiers.symbols(Settings.moveModifiers)) ←→↑↓  Move Window to Adjacent Zone", to: menu).isEnabled = false
         menu.addItem(.separator())
         add("Launch at Login", #selector(toggleLaunchAtLogin), to: menu, on: LaunchAtLogin.isEnabled)
         add("Automatic Updates", #selector(toggleUpdates), to: menu, on: Updater.isEnabled)

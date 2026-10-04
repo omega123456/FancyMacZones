@@ -20,6 +20,8 @@ final class EditorWindow: NSObject, NSWindowDelegate, NSTableViewDataSource, NST
     private let zonesStepper = ArrowStepper()
     private let zonesBox = BorderedView()
     private let zonesCaption = NSTextField(labelWithString: "")
+    private let shortcutRecorder = ModifierRecorder()
+    private let footer = NSTextField(wrappingLabelWithString: "")
     private var actionButtons: [NSButton] = []
     private var templateCards: [LayoutCard] = []
     private var customCards: [LayoutCard] = []
@@ -198,8 +200,12 @@ final class EditorWindow: NSObject, NSWindowDelegate, NSTableViewDataSource, NST
         // Footer: a hairline and the hint text, 12 pt secondary.
         let rule = NSBox()
         rule.boxType = .separator
-        let footer = NSTextField(wrappingLabelWithString:
-            "Drag a window and right-click to show zones · ⌃⌘ ←→↑↓ moves the focused window to the adjacent zone · Drag to the top edge to maximize")
+        // Shortcut row: the recorded modifiers, then the fixed arrows (requirement 14, ADR 7c41d0a2).
+        shortcutRecorder.onChange = { [weak self] in self?.updateFooter() }
+        let shortcutRow = NSStackView(views: [NSTextField(labelWithString: "Move to adjacent zone:"), shortcutRecorder,
+                                              NSTextField(labelWithString: "+ ←→↑↓")])
+        shortcutRow.spacing = 6
+        updateFooter()
         footer.font = .systemFont(ofSize: 12)
         footer.textColor = .secondaryLabelColor
         let divider = NSBox()
@@ -210,7 +216,7 @@ final class EditorWindow: NSObject, NSWindowDelegate, NSTableViewDataSource, NST
 
         let root = FillView(color: .controlBackgroundColor) // white, or the dark window colour
         root.frame = CGRect(x: 0, y: 0, width: 760, height: 520)
-        for v in [sidebar, divider, gallery, rule, footer] as [NSView] {
+        for v in [sidebar, divider, gallery, rule, shortcutRow, footer] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(v)
         }
@@ -240,10 +246,17 @@ final class EditorWindow: NSObject, NSWindowDelegate, NSTableViewDataSource, NST
             rule.heightAnchor.constraint(equalToConstant: 1),
             footer.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 14),
             footer.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -14),
-            footer.topAnchor.constraint(equalTo: rule.bottomAnchor, constant: 8),
+            shortcutRow.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 14),
+            shortcutRow.topAnchor.constraint(equalTo: rule.bottomAnchor, constant: 8),
+            footer.topAnchor.constraint(equalTo: shortcutRow.bottomAnchor, constant: 6),
             footer.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -8),
         ])
         window.contentView = root
+    }
+
+    private func updateFooter() {
+        footer.stringValue = "Drag a window and right-click to show zones · \(HotKeyModifiers.symbols(Settings.moveModifiers)) ←→↑↓ "
+            + "moves the focused window to the adjacent zone · Drag to the top edge to maximize"
     }
 
     // MARK: Refreshing
@@ -775,5 +788,72 @@ private final class SidebarRowView: NSTableRowView {
     override func drawSelection(in dirtyRect: NSRect) {
         NSColor.controlAccentColor.setFill()
         NSBezierPath(roundedRect: bounds.insetBy(dx: 8, dy: 0), xRadius: 6, yRadius: 6).fill()
+    }
+}
+
+/// Records the adjacent-zone modifiers (requirement 14, ADR 7c41d0a2). Click (or press Space/Return while focused)
+/// to record, hold the modifiers, release them all to save. Esc cancels; a set without ⌃, ⌥ or ⌘ beeps.
+private final class ModifierRecorder: NSTextField {
+    var onChange: (() -> Void)?
+    private var recording = false { didSet { refresh() } }
+    private var peak: NSEvent.ModifierFlags = []
+
+    init() {
+        super.init(frame: .zero)
+        isEditable = false
+        isSelectable = false
+        isBezeled = true
+        bezelStyle = .roundedBezel
+        alignment = .center
+        setAccessibilityRole(.button)
+        setAccessibilityLabel("Adjacent zone shortcut modifiers")
+        widthAnchor.constraint(equalToConstant: 120).isActive = true
+        refresh()
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    private func refresh() {
+        stringValue = recording ? (peak.isEmpty ? "Type modifiers…" : HotKeyModifiers.symbols(peak))
+                                : HotKeyModifiers.symbols(Settings.moveModifiers)
+        textColor = recording ? .controlAccentColor : .labelColor
+    }
+
+    private func start() {
+        window?.makeFirstResponder(self)
+        peak = []
+        recording = true
+    }
+
+    private func stop() {
+        recording = false
+        if window?.firstResponder === self { window?.makeFirstResponder(nil) }
+    }
+
+    override var acceptsFirstResponder: Bool { true }
+    override func resignFirstResponder() -> Bool {
+        recording = false
+        return super.resignFirstResponder()
+    }
+    override func mouseDown(with event: NSEvent) { start() }
+    override func accessibilityPerformPress() -> Bool { start(); return true }
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 53 { return stop() } // Esc
+        if !recording, event.charactersIgnoringModifiers == " " || event.charactersIgnoringModifiers == "\r" { return start() }
+        NSSound.beep()
+    }
+
+    override func flagsChanged(with event: NSEvent) {
+        guard recording else { return super.flagsChanged(with: event) }
+        let now = event.modifierFlags.intersection(HotKeyModifiers.relevant)
+        peak.formUnion(now)
+        guard now.isEmpty else { return refresh() }
+        defer { peak = [] }
+        guard HotKeyModifiers.isValid(peak) else { NSSound.beep(); return refresh() }
+        EventLog.write("editor: adjacent-zone modifiers → \(HotKeyModifiers.symbols(peak))")
+        Settings.moveModifiers = peak
+        stop()
+        onChange?()
     }
 }

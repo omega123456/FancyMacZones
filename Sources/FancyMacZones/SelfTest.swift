@@ -1,4 +1,5 @@
-import CoreGraphics
+import AppKit
+import Carbon
 import Foundation
 
 /// `--self-test` (requirement 25, NFR-7): checks of pure logic with explicit failure counting (not `assert`,
@@ -18,7 +19,7 @@ enum SelfTest {
             ("overlap rules", overlapRules), ("current zone", currentZone), ("directional target", directional),
             ("top band", topBand), ("exposed top edges", exposedTopEdges), ("mission control", missionControl),
             ("coordinates", coordinates), ("json", json), ("display names", displayNames), ("updater", updateVersions),
-            ("drag session", dragSession),
+            ("drag session", dragSession), ("hotkey modifiers", hotKeyModifiers),
         ]
         for (name, group) in groups {
             let before = total
@@ -493,5 +494,14 @@ enum SelfTest {
         check("update: v-prefixed tag is newer", Updater.isNewer("v1.1.0", than: "1.0.0"))
         check("update: 1.0 equals 1.0.0", !Updater.isNewer("1.0", than: "1.0.0") && !Updater.isNewer("1.0.0", than: "1.0"))
         check("update: older is not newer", !Updater.isNewer("1.9.9", than: "2.0.0"))
+    }
+
+    private static func hotKeyModifiers() {
+        check("⌃⌘ valid", HotKeyModifiers.isValid([.control, .command]))
+        check("⇧ alone invalid", !HotKeyModifiers.isValid(.shift))
+        check("nothing invalid", !HotKeyModifiers.isValid([]))
+        check("symbols in system order", HotKeyModifiers.symbols([.command, .shift, .option, .control]) == "⌃⌥⇧⌘")
+        check("carbon ⌃⌥", HotKeyModifiers.carbon([.control, .option]) == controlKey | optionKey)
+        check("carbon ignores caps lock", HotKeyModifiers.carbon([.command, .capsLock]) == cmdKey)
     }
 }
