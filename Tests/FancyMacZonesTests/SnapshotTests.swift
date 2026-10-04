@@ -18,6 +18,7 @@ final class Backdrop: NSView {
     }
 }
 
+private let imageStrategy = Snapshotting<NSImage, NSImage>.image(precision: 0.99, perceptualPrecision: 0.98)
 private let strategy = Snapshotting<NSView, NSImage>.image(precision: 0.99, perceptualPrecision: 0.98)
 
 /// Offscreen renders of the overlay, the gallery cards and both editors, compared with the PNGs in __Snapshots__.
@@ -145,6 +146,76 @@ extension Desktop {
                 editor.mouseDragged(with: mouse(.leftMouseDragged, at: CGPoint(x: 244, y: 300), in: editor))
             }
             assertSnapshot(of: back as NSView, as: strategy, named: c.rawValue, testName: "CanvasEditor")
+        }
+
+        // MARK: Edit Layouts window
+
+        enum EditorCase: String, CaseIterable {
+            case gallery, galleryDark, customSelected
+        }
+
+        /// The whole window content, two displays in the sidebar. Rendered from its layers: the root, the sidebar
+        /// and the action buttons paint through `updateLayer`, which `cacheDisplay` doesn't capture.
+        @Test(arguments: EditorCase.allCases)
+        func editor(_ c: EditorCase) async {
+            let h = Harness()
+            h.screens = [h.main, h.side]
+            let store = LayoutStore()
+            if c == .customSelected {
+                let custom = CustomLayout(id: UUID(), name: "Coding", body: .grid(.initial))
+                store.add(custom)
+                store.assign(.custom(custom.id), to: store.displays[0])
+            }
+            EditorWindow.show(store: store)
+            let window = EditorWindow.shared!.window
+            defer { window.close() }
+            window.appearance = NSAppearance(named: c == .galleryDark ? .darkAqua : .aqua)
+            await settle()
+            let view = window.contentView!
+            view.layoutSubtreeIfNeeded()
+            view.displayIfNeeded()
+            assertSnapshot(of: layerImage(view), as: imageStrategy, named: c.rawValue, testName: "EditorWindow")
+        }
+
+        func layerImage(_ view: NSView) -> NSImage {
+            let scale = view.window?.backingScaleFactor ?? 1
+            let size = view.bounds.size
+            let ctx = CGContext(data: nil, width: Int(size.width * scale), height: Int(size.height * scale), bitsPerComponent: 8,
+                                bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            ctx.scaleBy(x: scale, y: scale)
+            view.layer!.render(in: ctx)
+            return NSImage(cgImage: ctx.makeImage()!, size: size)
+        }
+
+        // MARK: Status item menu
+
+        enum MenuCase: String, CaseIterable {
+            case oneDisplay, twoDisplays, untrusted
+        }
+
+        /// NSMenu can't be drawn offscreen (it renders only while tracking on a real display), so the menu is
+        /// compared as text: ✓ for on, (disabled), separators as ---, submenus indented.
+        @Test(arguments: MenuCase.allCases)
+        func menu(_ c: MenuCase) {
+            let h = Harness()
+            if c == .twoDisplays { h.screens = [h.main, h.side] }
+            let store = LayoutStore()
+            store.add(CustomLayout(id: UUID(), name: "Coding", body: .grid(.initial)))
+            let bar = MenuBar(store: store)
+            bar.trusted = c != .untrusted
+            bar.menuNeedsUpdate(bar.menu)
+            assertSnapshot(of: Self.outline(bar.menu), as: .lines, named: c.rawValue, testName: "MenuBar")
+        }
+
+        static func outline(_ menu: NSMenu, _ indent: String = "") -> String {
+            menu.items.map { item in
+                if item.isSeparatorItem { return indent + "---" }
+                // The debug header carries the host bundle's version, which isn't ours under swift test.
+                let title = item.title.hasPrefix("FancyMacZones Dev ") ? "FancyMacZones Dev <version> (debug)" : item.title
+                let line = indent + (item.state == .on ? "✓ " : "  ") + title + (item.isEnabled ? "" : " (disabled)")
+                return item.submenu.map { line + "\n" + outline($0, indent + "    ") } ?? line
+            }.joined(separator: "\n")
         }
     }
 }

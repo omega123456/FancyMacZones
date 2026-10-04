@@ -1,0 +1,7 @@
+  FancyMacZones Dev <version> (debug) (disabled)
+---
+  Accessibility Access Needed (disabled)
+  FancyMacZones needs this to move windows. (disabled)
+  Open Accessibility Settings…
+---
+  Quit FancyMacZones

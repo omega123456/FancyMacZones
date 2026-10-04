@@ -1,0 +1,41 @@
+  FancyMacZones Dev <version> (debug) (disabled)
+---
+  Studio Display (Main) — Priority Grid
+      Blank
+    ---
+      Focus
+      Columns
+      Rows
+      Grid
+    ✓ Priority Grid
+    ---
+      Coding
+  DELL U2720Q — Priority Grid
+      Blank
+    ---
+      Focus
+      Columns
+      Rows
+      Grid
+    ✓ Priority Grid
+    ---
+      Coding
+---
+  Edit Layouts…
+  Export Layouts…
+  Import Layouts…
+  Overlap Rule
+    ✓ Smallest Zone Wins
+      Closest Centre Wins
+---
+✓ Drag to Top to Maximize
+✓ Double-Click Title Bar to Maximize
+✓ Prevent Mission Control While Dragging
+---
+  ⌃⌘ ←→↑↓  Move Window to Adjacent Zone (disabled)
+---
+  Launch at Login
+✓ Automatic Updates
+  Check for Updates…
+---
+  Quit FancyMacZones
