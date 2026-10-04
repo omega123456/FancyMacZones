@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 
 /// The status item and its menu (requirements 18, 19). The menu is built each time it opens (DD-11); the
 /// image changes only when trust changes. Plain NSMenu target/action: this app may activate.
@@ -56,6 +57,8 @@ final class MenuBar: NSObject, NSMenuDelegate {
         if !displays.isEmpty { menu.addItem(.separator()) }
 
         add("Edit Layouts…", #selector(editLayouts), to: menu) // requirement 18: before "Overlap Rule"
+        add("Export Layouts…", #selector(exportLayouts), to: menu)
+        add("Import Layouts…", #selector(importLayouts), to: menu)
         let rules = NSMenu()
         let rule = Settings.overlapRule
         add("Smallest Zone Wins", #selector(chooseRule), to: rules, on: rule == .smallestArea, object: OverlapRule.smallestArea.rawValue)
@@ -130,6 +133,45 @@ final class MenuBar: NSObject, NSMenuDelegate {
 
     /// Opens the Edit Layouts window, or brings the open one to the front (DD-12).
     @objc private func editLayouts() { EditorWindow.show(store: store) }
+
+    /// Writes the whole `layouts.json` (custom layouts and per-display assignments) to a file the user picks.
+    @objc private func exportLayouts() {
+        NSApp.activate() // DD-12: the app stays an LSUIElement agent
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = "FancyMacZones Layouts.json"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard LayoutStore.save(store.file, to: url) else { return alert("Export Failed", "Could not write \(url.lastPathComponent).") }
+        EventLog.write("menu: exported layouts to \(url.lastPathComponent)")
+    }
+
+    /// Replaces every layout and assignment with an exported file, after confirmation. Assignments for
+    /// displays that aren't connected are kept and apply when that display is.
+    @objc private func importLayouts() {
+        NSApp.activate()
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard let data = try? Data(contentsOf: url), let file = LayoutFile.decode(data) else {
+            return alert("Import Failed", "\(url.lastPathComponent) is not a FancyMacZones layouts file.")
+        }
+        let confirm = NSAlert()
+        confirm.alertStyle = .warning
+        confirm.messageText = "Replace All Layouts?"
+        confirm.informativeText = "Your custom layouts and display assignments will be replaced by the \(file.customLayouts.count) custom layouts in \(url.lastPathComponent). This can’t be undone."
+        confirm.addButton(withTitle: "Replace").hasDestructiveAction = true
+        confirm.addButton(withTitle: "Cancel")
+        guard confirm.runModal() == .alertFirstButtonReturn else { return }
+        EventLog.write("menu: imported layouts from \(url.lastPathComponent)")
+        store.replaceAll(with: file)
+    }
+
+    private func alert(_ title: String, _ text: String) {
+        let a = NSAlert()
+        a.messageText = title
+        a.informativeText = text
+        a.runModal()
+    }
 
     @objc private func toggleDragToTop() { Settings.dragToTop.toggle() }
     @objc private func toggleMissionControl() { Settings.missionControlGuard.toggle() }

@@ -244,6 +244,8 @@ final class LayoutStore {
     func rename(_ id: UUID, to name: String) { commit { $0.rename(id, to: name) } }
     func replaceBody(_ id: UUID, with body: CustomLayout.Body) { commit { $0.replaceBody(id, with: body) } }
     func delete(_ id: UUID) { commit { $0.deleteCustom(id) } }
+    /// Import: the whole file, already validated by `LayoutFile.decode`.
+    func replaceAll(with new: LayoutFile) { commit { $0 = new } }
 
     /// Adds a copy named "‹name› Copy" and returns it.
     @discardableResult
