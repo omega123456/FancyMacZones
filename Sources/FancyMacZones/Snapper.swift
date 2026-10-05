@@ -57,7 +57,8 @@ struct DragSession {
     var displays: [LayoutStore.Display] = []
     var zones: [PlacedZone] = []
     var primaryHeight: CGFloat = 0
-    var rule = OverlapRule.smallestArea
+    var grab = CGRect.null     // window bounds relative to the cursor at the last read, CG
+    var rule = OverlapRule.largestOverlap
     var dragToTop = true
     var missionControlGuard = true
 
@@ -319,6 +320,7 @@ final class Snapper {
         let id = session.windowID
         if first, let info { session.pid = info.pid }
         session = DragSession.afterRead(session, bounds: info?.bounds, now: now)
+        if let b = info?.bounds { session.grab = b.offsetBy(dx: -session.point.x, dy: -session.point.y) }
         let bounds = { info.map { "\($0.bounds)" } ?? "unreadable" }
         if first {
             EventLog.write("drag baseline window=\(id) pid=\(session.pid) app=\(NSRunningApplication(processIdentifier: session.pid)?.localizedName ?? "?") bounds=\(bounds())")
@@ -356,7 +358,10 @@ final class Snapper {
         let rects = session.zones.filter { $0.display == d }.map(\.rect)
         let shown = DragSession.overlay(requested: session.requested, confirmed: session.phase == .confirmed, blank: rects.isEmpty,
                                         topBand: session.dragToTop && Layouts.inTopBand(c, screen: display.frame))
-        return (shown, display, rects, shown == .zones ? Layouts.activeZone(at: c, in: rects, rule: session.rule) : nil)
+        // The window follows the cursor, so its frame comes from the last read without another one (DD-1).
+        let window = session.grab.isNull ? nil
+            : Layouts.cocoaRect(fromAX: session.grab.offsetBy(dx: p.x, dy: p.y), primaryHeight: session.primaryHeight)
+        return (shown, display, rects, shown == .zones ? Layouts.activeZone(at: c, in: rects, rule: session.rule, window: window) : nil)
     }
 
     private func show() {

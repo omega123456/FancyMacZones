@@ -86,6 +86,31 @@ extension Desktop {
             #expect(h.tapEnables == [false])
         }
 
+        @Test func overlappingZonesFollowTheOverlapRule() async {
+            snapper.start()
+            let canvas = store.draft(.canvas(CanvasLayout(zones: [CGRect(x: 0, y: 0, width: 1, height: 1),
+                                                                  CGRect(x: 0, y: 0, width: 0.25, height: 0.25)])))
+            store.add(canvas)
+            store.assign(.custom(canvas.id), to: store.displays[0])
+            let zones = store.zones(on: store.displays[0])
+            // In the corner zone, but most of the window (hanging below it) is only in the full one.
+            let p = CGPoint(x: zones[1].minX + 20, y: zones[1].maxY - 20)
+            func drop() async {
+                h.listWindow(7001, pid: Self.pid, frame: Self.frame)
+                await confirmedDrag(from: titlePoint)
+                await send(.leftMouseDragged, p)
+                await send(.rightMouseDown, p)
+                await send(.rightMouseUp, p)
+                await send(.leftMouseUp, p)
+            }
+            await drop() // default: Largest Overlap Wins
+            #expect(h.log.contains("drop: zone 1 on Studio Display (Main) → \(zones[0])"))
+            Settings.overlapRule = .smallestArea
+            await drop()
+            #expect(h.log.contains("drop: zone 2 on Studio Display (Main) → \(zones[1])"))
+            snapper.stop()
+        }
+
         @Test func dropWithoutTargetsOrOffTheDisplays() async {
             snapper.start()
             // Zones not requested: no target.

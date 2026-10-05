@@ -187,6 +187,7 @@ struct PlacedZone: Equatable {
 
 /// Requirement 9. Raw values are the `overlapRule` UserDefaults values.
 enum OverlapRule: String {
+    case largestOverlap = "coverage"
     case smallestArea = "smallest"
     case closestCentre = "centre"
 }
@@ -706,12 +707,17 @@ enum Layouts {
     // MARK: Snapping decisions
 
     /// Requirement 9: the zone containing `point`; among several, by the overlap rule, then its tie-breaks,
-    /// then the lower zone number. `rects` are in number order and in the same space as `point`.
-    static func activeZone(at point: CGPoint, in rects: [CGRect], rule: OverlapRule) -> Int? {
+    /// then the lower zone number. `rects` are in number order and in the same space as `point` and `window`
+    /// (the dragged window's frame; without it, Largest Overlap falls back to Smallest Zone).
+    static func activeZone(at point: CGPoint, in rects: [CGRect], rule: OverlapRule, window: CGRect? = nil) -> Int? {
         func key(_ i: Int) -> [CGFloat] {
             let r = rects[i]
             let area = r.width * r.height, dist = hypot(point.x - r.midX, point.y - r.midY)
-            return rule == .smallestArea ? [area, dist, CGFloat(i)] : [dist, area, CGFloat(i)]
+            switch rule {
+            case .largestOverlap: return [-coverage(of: window, in: r), area, dist, CGFloat(i)]
+            case .smallestArea: return [area, dist, CGFloat(i)]
+            case .closestCentre: return [dist, area, CGFloat(i)]
+            }
         }
         return rects.indices.filter { rects[$0].contains(point) }.min { less(key($0), key($1)) }
     }
@@ -733,6 +739,13 @@ enum Layouts {
         if let best = bestIoU(window, cornered, zones) { return best.index }
         if let best = bestIoU(window, Array(zones.indices), zones), best.iou >= minIoU { return best.index }
         return nil
+    }
+
+    /// The fraction of `window`'s area inside `zone` (0 without a window).
+    static func coverage(of window: CGRect?, in zone: CGRect) -> CGFloat {
+        guard let window, window.width * window.height > 0 else { return 0 }
+        let i = window.intersection(zone)
+        return i.isNull ? 0 : i.width * i.height / (window.width * window.height)
     }
 
     static func iou(_ a: CGRect, _ b: CGRect) -> CGFloat {

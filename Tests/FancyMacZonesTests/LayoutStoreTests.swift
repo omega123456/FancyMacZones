@@ -93,7 +93,7 @@ extension Desktop {
         }
 
         @Test func settings() {
-            #expect(Settings.overlapRule == .smallestArea)
+            #expect(Settings.overlapRule == .largestOverlap)
             Settings.overlapRule = .closestCentre
             #expect(Settings.overlapRule == .closestCentre)
             #expect(Settings.dragToTop && Settings.missionControlGuard && Settings.doubleClickMaximize)

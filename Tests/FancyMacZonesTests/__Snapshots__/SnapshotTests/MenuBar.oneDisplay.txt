@@ -15,7 +15,8 @@
   Export Layouts…
   Import Layouts…
   Overlap Rule
-    ✓ Smallest Zone Wins
+    ✓ Largest Overlap Wins
+      Smallest Zone Wins
       Closest Centre Wins
 ---
 ✓ Drag to Top to Maximize

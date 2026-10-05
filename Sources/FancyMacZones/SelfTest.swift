@@ -223,6 +223,15 @@ enum SelfTest {
         let e = r(0, 0, 200, 200), f = r(50, 50, 100, 100)
         check("closest: equal distance → smaller area", Layouts.activeZone(at: CGPoint(x: 100, y: 100), in: [e, f], rule: .closestCentre) == 1)
         check("closest: equal distance and area → lower number", Layouts.activeZone(at: CGPoint(x: 100, y: 100), in: [e, e], rule: .closestCentre) == 0)
+        let wide = r(0, 0, 1000, 400), small = r(0, 0, 300, 400), w = r(0, 0, 900, 400)
+        check("largest overlap: most of the window wins over the smaller zone",
+              Layouts.activeZone(at: CGPoint(x: 100, y: 200), in: [wide, small], rule: .largestOverlap, window: w) == 0)
+        check("largest overlap: a window inside both → smallest zone",
+              Layouts.activeZone(at: CGPoint(x: 100, y: 200), in: [wide, small], rule: .largestOverlap, window: r(10, 10, 200, 200)) == 1)
+        check("largest overlap: no window → smallest zone", Layouts.activeZone(at: p, in: [big, offCentre], rule: .largestOverlap) == 1)
+        check("coverage: half the window", Layouts.coverage(of: r(0, 0, 200, 100), in: r(100, 0, 500, 500)) == 0.5)
+        check("coverage: disjoint or empty window → 0", Layouts.coverage(of: r(0, 0, 10, 10), in: r(50, 50, 10, 10)) == 0
+              && Layouts.coverage(of: r(0, 0, 0, 10), in: r(0, 0, 50, 50)) == 0)
         check("no zone under the cursor → none", Layouts.activeZone(at: CGPoint(x: 900, y: 700), in: [c, d], rule: .smallestArea) == nil)
     }
 

@@ -158,7 +158,7 @@ enum Settings {
     private static var defaults: UserDefaults { Env.defaults }
 
     static var overlapRule: OverlapRule {
-        get { defaults.string(forKey: "overlapRule").flatMap(OverlapRule.init) ?? .smallestArea }
+        get { defaults.string(forKey: "overlapRule").flatMap(OverlapRule.init) ?? .largestOverlap }
         set { defaults.set(newValue.rawValue, forKey: "overlapRule") }
     }
 

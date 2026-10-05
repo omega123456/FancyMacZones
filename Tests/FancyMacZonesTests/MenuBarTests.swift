@@ -40,7 +40,7 @@ extension Desktop {
             let rules = bar.menu.items.first { $0.title == "Overlap Rule" }!.submenu!
             choose("Closest Centre Wins", in: rules)
             #expect(Settings.overlapRule == .closestCentre)
-            rules.items[0].representedObject = "nonsense"
+            rules.items[1].representedObject = "nonsense"
             choose("Smallest Zone Wins", in: rules)
             #expect(Settings.overlapRule == .closestCentre)
             choose("Drag to Top to Maximize", in: bar.menu)
