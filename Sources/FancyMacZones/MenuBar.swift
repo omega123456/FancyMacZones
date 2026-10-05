@@ -70,6 +70,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
         add("Largest Overlap Wins", #selector(chooseRule), to: rules, on: rule == .largestOverlap, object: OverlapRule.largestOverlap.rawValue)
         add("Smallest Zone Wins", #selector(chooseRule), to: rules, on: rule == .smallestArea, object: OverlapRule.smallestArea.rawValue)
         add("Closest Centre Wins", #selector(chooseRule), to: rules, on: rule == .closestCentre, object: OverlapRule.closestCentre.rawValue)
+        add("Split Overlap by Position", #selector(chooseRule), to: rules, on: rule == .positional, object: OverlapRule.positional.rawValue)
         add("Overlap Rule", to: menu).submenu = rules
         menu.addItem(.separator())
 

@@ -28,6 +28,7 @@
     ✓ Largest Overlap Wins
       Smallest Zone Wins
       Closest Centre Wins
+      Split Overlap by Position
 ---
 ✓ Drag to Top to Maximize
 ✓ Double-Click Title Bar to Maximize

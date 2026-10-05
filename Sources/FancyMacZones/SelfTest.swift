@@ -228,6 +228,16 @@ enum SelfTest {
               Layouts.activeZone(at: CGPoint(x: 100, y: 200), in: [wide, small], rule: .largestOverlap, window: w) == 0)
         check("largest overlap: a window inside both → smallest zone",
               Layouts.activeZone(at: CGPoint(x: 100, y: 200), in: [wide, small], rule: .largestOverlap, window: r(10, 10, 200, 200)) == 1)
+        let lower = r(0, 0, 600, 400), upper = r(300, 200, 600, 400) // overlap 300 wide, 200 high: split left to right
+        check("positional: left half of the overlap → zone 1", Layouts.activeZone(at: CGPoint(x: 400, y: 300), in: [lower, upper], rule: .positional) == 0)
+        check("positional: right half of the overlap → zone 2", Layouts.activeZone(at: CGPoint(x: 500, y: 300), in: [lower, upper], rule: .positional) == 1)
+        let tall = r(0, 0, 300, 900)
+        check("positional: the bottom edge clamps to the last zone", Layouts.activeZone(at: CGPoint(x: 100, y: 0), in: [tall, tall], rule: .positional) == 1)
+        check("positional: taller overlap splits top to bottom", Layouts.activeZone(at: CGPoint(x: 100, y: 800), in: [tall, tall, tall], rule: .positional) == 0
+              && Layouts.activeZone(at: CGPoint(x: 100, y: 450), in: [tall, tall, tall], rule: .positional) == 1
+              && Layouts.activeZone(at: CGPoint(x: 100, y: 100), in: [tall, tall, tall], rule: .positional) == 2)
+        check("positional: only the zones under the cursor share the overlap",
+              Layouts.activeZone(at: CGPoint(x: 100, y: 100), in: [lower, upper], rule: .positional) == 0)
         check("largest overlap: no window → smallest zone", Layouts.activeZone(at: p, in: [big, offCentre], rule: .largestOverlap) == 1)
         check("coverage: half the window", Layouts.coverage(of: r(0, 0, 200, 100), in: r(100, 0, 500, 500)) == 0.5)
         check("coverage: disjoint or empty window → 0", Layouts.coverage(of: r(0, 0, 10, 10), in: r(50, 50, 10, 10)) == 0

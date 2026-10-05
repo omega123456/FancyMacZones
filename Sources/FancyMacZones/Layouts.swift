@@ -190,6 +190,7 @@ enum OverlapRule: String {
     case largestOverlap = "coverage"
     case smallestArea = "smallest"
     case closestCentre = "centre"
+    case positional = "positional"
 }
 
 /// Arrow directions in global Cocoa coordinates (up = +y).
@@ -708,18 +709,26 @@ enum Layouts {
 
     /// Requirement 9: the zone containing `point`; among several, by the overlap rule, then its tie-breaks,
     /// then the lower zone number. `rects` are in number order and in the same space as `point` and `window`
-    /// (the dragged window's frame; without it, Largest Overlap falls back to Smallest Zone).
+    /// (the dragged window's frame; without it, Largest Overlap falls back to Smallest Zone). Positional, as in
+    /// FancyZones: the zones' common overlap is split into equal strips along its longer side, one per zone in
+    /// number order (left to right, or top to bottom with y up), and the strip under `point` wins.
     static func activeZone(at point: CGPoint, in rects: [CGRect], rule: OverlapRule, window: CGRect? = nil) -> Int? {
+        let hits = rects.indices.filter { rects[$0].contains(point) }
+        if rule == .positional, hits.count > 1 {
+            let o = hits.dropFirst().reduce(rects[hits[0]]) { $0.intersection(rects[$1]) }
+            let f = o.height > o.width ? (o.maxY - point.y) / o.height : (point.x - o.minX) / o.width
+            return hits[min(max(Int(f * CGFloat(hits.count)), 0), hits.count - 1)]
+        }
         func key(_ i: Int) -> [CGFloat] {
             let r = rects[i]
             let area = r.width * r.height, dist = hypot(point.x - r.midX, point.y - r.midY)
             switch rule {
             case .largestOverlap: return [-coverage(of: window, in: r), area, dist, CGFloat(i)]
-            case .smallestArea: return [area, dist, CGFloat(i)]
+            case .smallestArea, .positional: return [area, dist, CGFloat(i)]
             case .closestCentre: return [dist, area, CGFloat(i)]
             }
         }
-        return rects.indices.filter { rects[$0].contains(point) }.min { less(key($0), key($1)) }
+        return hits.min { less(key($0), key($1)) }
     }
 
     /// Requirement 15: the zone a window (global Cocoa) is already in. Edge alignment first (left, right and top
