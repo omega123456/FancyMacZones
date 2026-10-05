@@ -19,6 +19,7 @@ struct ZoneStyle {
     static let cornerRadius: CGFloat = 8
     static let pillInset: CGFloat = 8   // inside the border
     static let pillFont = NSFont.monospacedDigitSystemFont(ofSize: 28, weight: .semibold)
+    static let sizeFont = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium)
     private static let pillPadding = CGSize(width: 18, height: 4)
     private static let pillGap: CGFloat = 8
     private static let symbol = NSImage.SymbolConfiguration(pointSize: 24, weight: .semibold)
@@ -44,6 +45,9 @@ struct ZoneStyle {
     var inactiveFill: CGColor { dark ? CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.12) : CGColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.08) }
     var inactiveBorder: CGColor { label.copy(alpha: thick ? 1 : 0.5)! }
     var inactiveBorderWidth: CGFloat { thick ? 3 : 2 }
+    /// The opposite of the border's colour: the border alone vanishes over windows that match it (a dark window
+    /// in light appearance, and vice versa).
+    var inactiveHalo: CGColor { dark ? rgb(0x000000, 0.6) : rgb(0xFFFFFF, 0.7) }
     var activeFill: CGColor { accent.copy(alpha: 0.35)! }
     var activeBorder: CGColor { accent }
     var activeBorderWidth: CGFloat { thick ? 4 : 3 }
@@ -64,6 +68,14 @@ struct ZoneStyle {
         ctx.addPath(CGPath(roundedRect: inner, cornerWidth: ir, cornerHeight: ir, transform: nil))
         ctx.setStrokeColor(active ? activeBorder : inactiveBorder)
         ctx.setLineWidth(w)
+        ctx.strokePath()
+        // Inactive zones add a 1 pt halo just inside the border, so they stay visible over any window behind them.
+        let halo = inner.insetBy(dx: w / 2 + 0.5, dy: w / 2 + 0.5)
+        guard !active, halo.width > 0, halo.height > 0 else { return }
+        let hr = max(min(ir - w / 2 - 0.5, halo.width / 2, halo.height / 2), 0)
+        ctx.addPath(CGPath(roundedRect: halo, cornerWidth: hr, cornerHeight: hr, transform: nil))
+        ctx.setStrokeColor(inactiveHalo)
+        ctx.setLineWidth(1)
         ctx.strokePath()
     }
 
@@ -99,12 +111,7 @@ struct ZoneStyle {
     /// Draws into the current NSGraphicsContext (text and symbols need it).
     func drawPill(_ pill: Pill, in rect: CGRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
-        ctx.saveGState()
-        ctx.setShadow(offset: CGSize(width: 0, height: -1), blur: 4, color: CGColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.25))
-        ctx.addPath(CGPath(roundedRect: rect, cornerWidth: rect.height / 2, cornerHeight: rect.height / 2, transform: nil))
-        ctx.setFillColor(pillBackground)
-        ctx.fillPath()
-        ctx.restoreGState()
+        drawCapsule(rect, in: ctx)
         var x = rect.minX + Self.pillPadding.width
         func drawImage(_ img: NSImage) {
             img.draw(in: CGRect(x: x, y: rect.midY - img.size.height / 2, width: img.size.width, height: img.size.height),
@@ -124,6 +131,31 @@ struct ZoneStyle {
                 drawImage(glyph)
             }
         }
+    }
+
+    /// The editors' live size tag: the zone's size in points ("960 × 540"), what a window snapped into it gets.
+    /// Centred in the zone but never above `pill`'s bottom; skipped when it doesn't fit inside the border. Flipped
+    /// views only (the editors).
+    func drawSize(of zone: CGRect, below pill: CGRect, active: Bool) {
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        let text = NSAttributedString(string: "\(Int(zone.width.rounded())) × \(Int(zone.height.rounded()))",
+                                      attributes: [.font: Self.sizeFont, .foregroundColor: pillText])
+        let t = text.size(), s = CGSize(width: ceil(t.width) + 16, height: ceil(t.height) + 6)
+        let rect = CGRect(x: (zone.midX - s.width / 2).rounded(), y: max(zone.midY - s.height / 2, pill.maxY + 6).rounded(),
+                          width: s.width, height: s.height)
+        let border = active ? activeBorderWidth : inactiveBorderWidth
+        guard zone.insetBy(dx: border, dy: border).contains(rect) else { return }
+        drawCapsule(rect, in: ctx)
+        text.draw(at: CGPoint(x: rect.midX - t.width / 2, y: rect.midY - t.height / 2))
+    }
+
+    private func drawCapsule(_ rect: CGRect, in ctx: CGContext) {
+        ctx.saveGState()
+        ctx.setShadow(offset: CGSize(width: 0, height: -1), blur: 4, color: CGColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.25))
+        ctx.addPath(CGPath(roundedRect: rect, cornerWidth: rect.height / 2, cornerHeight: rect.height / 2, transform: nil))
+        ctx.setFillColor(pillBackground)
+        ctx.fillPath()
+        ctx.restoreGState()
     }
 
     private func numberString(_ n: Int) -> NSAttributedString {

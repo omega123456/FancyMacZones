@@ -66,6 +66,8 @@ extension Desktop {
             case .activeContrast: view.zones = zones(.columns); view.active = 2
             case .maximize, .maximizeDark: view.zones = zones(.grid); view.maximize = usable
             }
+            let window = host(back) // 2x, like the references
+            defer { window.close() }
             assertSnapshot(of: back as NSView, as: strategy, named: c.rawValue, testName: "ZoneView")
         }
 
@@ -88,6 +90,8 @@ extension Desktop {
             let back = Self.backdrop(CGSize(width: card.frame.width + 8, height: card.frame.height + 8), dark ? .dark : .light, h)
             card.setFrameOrigin(CGPoint(x: 4, y: 4))
             back.addSubview(card)
+            let window = host(back) // 2x, like the references
+            defer { window.close() }
             assertSnapshot(of: back as NSView, as: strategy, named: c.rawValue, testName: "LayoutCard")
         }
 
@@ -125,13 +129,15 @@ extension Desktop {
 
         enum CanvasCase: String, CaseIterable {
             case initial, selected, selectedDark, overlapping, snapGuides
+            case overDarkWindow // light appearance over a dark window: the inactive halo keeps zones visible
         }
 
         @Test(arguments: CanvasCase.allCases)
         func canvas(_ c: CanvasCase) {
             let h = Harness()
             let size = CGSize(width: 600, height: 360)
-            let back = Self.backdrop(size, c == .selectedDark ? .dark : .light, h)
+            let back = Self.backdrop(size, c == .selectedDark || c == .overDarkWindow ? .dark : .light, h)
+            if c == .overDarkWindow { back.appearance = NSAppearance(named: .aqua) }
             let two = CanvasLayout(zones: [CGRect(x: 0.05, y: 0.1, width: 0.5, height: 0.6), CGRect(x: 0.4, y: 0.3, width: 0.5, height: 0.6)])
             let editor = CanvasEditorView(c == .initial || c == .selected || c == .selectedDark ? .initial : two,
                                           frame: back.bounds, history: UndoManager())
@@ -139,7 +145,7 @@ extension Desktop {
             let window = host(back)
             defer { window.close() }
             switch c {
-            case .initial, .overlapping: break
+            case .initial, .overlapping, .overDarkWindow: break
             case .selected, .selectedDark: editor.mouseDown(with: mouse(.leftMouseDown, at: CGPoint(x: 300, y: 180), in: editor))
             case .snapGuides: // zone 2 dragged until its left edge is 4 pt from zone 1's (x 30): it snaps there
                 editor.mouseDown(with: mouse(.leftMouseDown, at: CGPoint(x: 450, y: 300), in: editor))

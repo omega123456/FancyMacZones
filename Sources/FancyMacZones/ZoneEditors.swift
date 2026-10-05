@@ -468,8 +468,9 @@ final class GridEditorView: ZoneEditorView {
         for z in 0..<grid.zoneCount { // square corners: grid zones tile; the merge selection uses the active fill
             let r = zoneRect(z)
             style.drawZone(r, active: selection.contains(z), cornerRadius: 0, in: ctx)
-            let pill = ZoneStyle.Pill.number(z + 1, winner: false)
-            style.drawPill(pill, in: style.pillRect(pill, in: r, active: false, centred: true, flipped: true))
+            let pill = ZoneStyle.Pill.number(z + 1, winner: false), pr = style.pillRect(pill, in: r, active: false, centred: true, flipped: true)
+            style.drawPill(pill, in: pr)
+            style.drawSize(of: r, below: pr, active: selection.contains(z))
         }
         // The split preview: a 2 pt dashed accent line at the cursor across the zone under it.
         if drag == nil, let p = hover, case .zone(let z)? = grid.hitTest(p, area: area) {
@@ -737,12 +738,16 @@ final class CanvasEditorView: ZoneEditorView {
         for i in canvas.zones.indices where i != selected { // z-order, translucent: overlaps look darker
             let r = zoneRect(i), pill = ZoneStyle.Pill.number(i + 1, winner: false)
             style.drawZone(r, active: false, in: ctx)
-            style.drawPill(pill, in: style.pillRect(pill, in: r, active: false, centred: false, flipped: true))
+            let pr = style.pillRect(pill, in: r, active: false, centred: false, flipped: true)
+            style.drawPill(pill, in: pr)
+            style.drawSize(of: r, below: pr, active: false)
         }
         if let s = selected { // on top: 3 pt accent border, 8 handles, the ×
             let r = zoneRect(s), pill = ZoneStyle.Pill.number(s + 1, winner: false)
             style.drawZone(r, active: true, in: ctx)
-            style.drawPill(pill, in: style.pillRect(pill, in: r, active: true, centred: false, flipped: true))
+            let pr = style.pillRect(pill, in: r, active: true, centred: false, flipped: true)
+            style.drawPill(pill, in: pr)
+            style.drawSize(of: r, below: pr, active: true)
             let h = CanvasLayout.handleSize
             for handle in Handle.allCases {
                 let c = handle.point(on: r)

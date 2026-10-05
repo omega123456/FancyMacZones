@@ -31,6 +31,8 @@ final class FakeScreen: NSScreen {
 /// A titled window AppKit never constrains onto a real display (it stays on the fake one, off the desktop).
 final class OffscreenWindow: NSWindow {
     override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
+    /// Pinned to Retina, so snapshots don't follow whichever display is main (a 1x external one halves them).
+    override var backingScaleFactor: CGFloat { 2 }
 }
 
 /// Own notification center (system workspace events never arrive), no real URL opens.
@@ -266,7 +268,7 @@ final class Harness {
 /// A view hosted in a borderless window that is never ordered on screen, so events can target it.
 @MainActor
 func host(_ view: NSView, appearance: NSAppearance.Name = .aqua) -> NSWindow {
-    let w = NSWindow(contentRect: CGRect(x: -20000, y: -20000, width: view.frame.maxX, height: view.frame.maxY),
+    let w = OffscreenWindow(contentRect: CGRect(x: -20000, y: -20000, width: view.frame.maxX, height: view.frame.maxY),
                      styleMask: .borderless, backing: .buffered, defer: true)
     w.isReleasedWhenClosed = false
     w.appearance = NSAppearance(named: appearance)
