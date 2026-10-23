@@ -1,5 +1,11 @@
 # FancyMacZones
 
+
+
+https://github.com/user-attachments/assets/ebf30c1a-c65e-4340-b08f-603f337440d9
+
+
+
 FancyZones-style window zones for macOS 26 on Apple Silicon. Each display has its own layout of zones:
 
 - **Drag snapping:** while dragging a window, right-click to show the zones of the display under the cursor, then release over a zone to snap the window into it. Right-click again to hide them.
