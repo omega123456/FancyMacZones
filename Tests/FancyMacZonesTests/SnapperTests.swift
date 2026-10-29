@@ -353,6 +353,49 @@ extension Desktop {
             snapper.stop()
         }
 
+        @Test func doubleClickMaximizesFromATitleBarTheAppDraws() async {
+            snapper.start()
+            // Web content up to the top edge, traffic lights centred 24 pt down: the drawn bar is 48 pt tall.
+            let top = h.cg(Self.frame)
+            let content = h.ax.element(of: Self.pid), text = h.ax.element(of: Self.pid), close = h.ax.element(of: Self.pid)
+            h.ax.attrs[content] = [kAXRoleAttribute: kAXGroupRole as CFString, kAXWindowAttribute: window]
+            h.ax.attrs[text] = [kAXRoleAttribute: kAXStaticTextRole as CFString, kAXWindowAttribute: window]
+            h.ax.attrs[close] = [kAXPositionAttribute: axPoint(CGPoint(x: top.minX + 20, y: top.minY + 17)), kAXSizeAttribute: axSize(CGSize(width: 14, height: 14))]
+            func doubleClick(_ hit: AXUIElement, down: CGFloat) async {
+                h.ax.hit = hit
+                let p = CGPoint(x: Self.frame.midX, y: Self.frame.maxY - down)
+                await send(.leftMouseDown, p)
+                await send(.leftMouseUp, p, clicks: 2)
+            }
+
+            // Without traffic lights there is no bar to go by.
+            await doubleClick(content, down: 10)
+            #expect(h.ax.sets.isEmpty)
+            h.ax.attrs[window]![kAXCloseButtonAttribute] = close
+            // Text, or content below the bar, is left to the click.
+            await doubleClick(text, down: 10)
+            await doubleClick(content, down: 60)
+            #expect(h.ax.sets.isEmpty)
+            await doubleClick(content, down: 40)
+            let usable = h.cg(h.main.visibleFrame)
+            #expect(h.ax.writes(window) == ["size 1200x775", "pos \(Int(usable.minX)),\(Int(usable.minY))", "size 1200x775"])
+            #expect(h.log.contains("double-click: maximize window=7001 on Studio Display (Main)"))
+
+            // Warp: the whole window is one text area. A text area lower down is a real field.
+            let canvas = h.ax.element(of: Self.pid)
+            h.ax.attrs[canvas] = [kAXRoleAttribute: kAXTextAreaRole as CFString, kAXWindowAttribute: window,
+                                  kAXPositionAttribute: axPoint(CGPoint(x: top.minX, y: top.minY + 30)), kAXSizeAttribute: axSize(top.size)]
+            h.ax.attrs[window]![kAXPositionAttribute] = axPoint(top.origin)
+            h.ax.attrs[window]![kAXSizeAttribute] = axSize(top.size)
+            h.ax.sets = []
+            await doubleClick(canvas, down: 40)
+            #expect(h.ax.sets.isEmpty)
+            h.ax.attrs[canvas]![kAXPositionAttribute] = axPoint(top.origin)
+            await doubleClick(canvas, down: 10)
+            #expect(h.ax.writes(window).count == 3)
+            snapper.stop()
+        }
+
         // MARK: Hotkeys
 
         @Test func hotkeysMoveTheFocusedWindow() async {

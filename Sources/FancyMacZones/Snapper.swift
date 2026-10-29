@@ -103,6 +103,16 @@ enum TitleBar {
     static func isHit(role: String?, isTitle: Bool) -> Bool {
         isTitle || role == kAXWindowRole || role == kAXToolbarRole
     }
+
+    /// A bar the app draws itself (web content) shows up as a plain container. Controls (buttons, fields, tabs,
+    /// links) and text are left to the click; the caller also requires the point to be in `Layouts.inDrawnTitleBar`.
+    static func isPassive(role: String?) -> Bool {
+        [kAXGroupRole, "AXWebArea", kAXScrollAreaRole, kAXUnknownRole].contains(role)
+    }
+
+    /// An app that draws its whole window in one view (Warp) exposes it as a single text area. It counts only when
+    /// it reaches the window's top edge (`Layouts.reachesTop`), under the traffic lights, where no real field sits.
+    static func mayBeCanvas(role: String?) -> Bool { role == kAXTextAreaRole }
 }
 
 /// Pre-maximize frames (global Cocoa) by window ID, so a title-bar double-click on a window still at the frame
@@ -414,9 +424,9 @@ final class Snapper {
         }
     }
 
-    /// A double-click (second left-up, no window drag) on a title bar maximizes that window to its display's
-    /// visible frame, or restores it if it is still where this app maximized it. Left alone when macOS itself
-    /// minimizes on title-bar double-click.
+    /// A double-click (second left-up, no window drag) on a title bar, native or drawn by the app, maximizes that
+    /// window to its display's visible frame, or restores it if it is still where this app maximized it. Left alone
+    /// when macOS itself minimizes on title-bar double-click.
     private func maximizeTitleBar(at p: CGPoint) {
         guard Env.defaults.string(forKey: "AppleActionOnDoubleClick") != "Minimize" else { return }
         do {
@@ -424,7 +434,15 @@ final class Snapper {
             let role = try AX.string(hit, kAXRoleAttribute)
             guard let window = role == kAXWindowRole ? hit : try AX.element(hit, kAXWindowAttribute) else { return }
             let title = try AX.element(window, kAXTitleUIElementAttribute)
-            guard TitleBar.isHit(role: role, isTitle: title.map { CFEqual($0, hit) } ?? false) else { return }
+            if !TitleBar.isHit(role: role, isTitle: title.map { CFEqual($0, hit) } ?? false) {
+                // No native title bar under the point: one the app draws itself, marked out by its traffic lights.
+                guard TitleBar.isPassive(role: role) || TitleBar.mayBeCanvas(role: role),
+                      let close = try AX.element(window, kAXCloseButtonAttribute), let button = try AX.frame(close),
+                      let frame = try AX.frame(window), Layouts.inDrawnTitleBar(p, window: frame, closeButton: button) else { return }
+                if TitleBar.mayBeCanvas(role: role) {
+                    guard let area = try AX.frame(hit), Layouts.reachesTop(area, of: frame) else { return }
+                }
+            }
             guard let pid = AX.backend.pid(window), pid != getpid(), try AX.isStandardWindow(window) else {
                 return EventLog.write("double-click: title bar window not eligible, left alone")
             }

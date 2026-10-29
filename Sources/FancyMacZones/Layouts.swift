@@ -659,6 +659,7 @@ extension CanvasLayout: Codable {
 
 enum Layouts {
     static let topBand: CGFloat = 5                  // requirement 11
+    static let drawnTitleBarMax: CGFloat = 80        // tallest bar an app draws itself (Teams, Slack, VS Code: 35–64)
     static let edgeTolerance: CGFloat = 8            // requirement 15
     static let minIoU: CGFloat = 0.6                 // requirement 15
     static let bandOverlap: CGFloat = 1              // requirement 16
@@ -794,6 +795,17 @@ enum Layouts {
     static func inTopBand(_ point: CGPoint, screen: CGRect) -> Bool {
         point.x >= screen.minX && point.x <= screen.maxX && point.y >= screen.maxY - topBand && point.y <= screen.maxY
     }
+
+    /// Double-click to maximize, for an app that draws its own title bar (Teams, Electron): `point` lies in the
+    /// band from the window's top edge down to the traffic lights' centre and as far again below it, since such
+    /// apps centre the lights vertically in their bar (capped at `drawnTitleBarMax`). AX (top-left) coordinates.
+    static func inDrawnTitleBar(_ point: CGPoint, window: CGRect, closeButton: CGRect) -> Bool {
+        let band = min(2 * (closeButton.midY - window.minY), drawnTitleBarMax)
+        return band > 0 && point.x >= window.minX && point.x <= window.maxX && point.y >= window.minY && point.y <= window.minY + band
+    }
+
+    /// An element starting at the window's top edge (within 1 pt), i.e. drawn under the traffic lights. AX coordinates.
+    static func reachesTop(_ element: CGRect, of window: CGRect) -> Bool { element.minY <= window.minY + 1 }
 
     /// DD-7: each display's top edge minus the x-ranges of displays directly above it. CG frames (y down),
     /// e.g. `CGDisplayBounds`.
